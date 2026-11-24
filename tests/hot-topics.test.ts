@@ -242,3 +242,10 @@ describe("runHotTopics", () => {
     expect(r.rejected?.[0].reason).toMatch(/liste noire/);
   });
 });
+
+describe("caption ending", () => {
+  it("accepts a trailing emoji after the question mark but not a statement", () => {
+    expect("post" in validateProposal({ ...good, caption: "Larkin arrive. Trop payé? 🏒" }, cands)).toBe(true);
+    expect("reason" in validateProposal({ ...good, caption: "Larkin arrive. Trop payé?! Wow." }, cands)).toBe(true);
+  });
+});

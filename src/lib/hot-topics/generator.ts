@@ -53,7 +53,7 @@ RÈGLES D'ÉCRITURE:
 - Tutoiement (tu/te/ton), ton québécois naturel, jamais de vouvoiement.
 - Le post doit être une VRAIE question qui divise ou qui touche tout le monde (A ou B, trop/pas assez, d'accord/pas d'accord). Elle doit se comprendre sans lire un article.
 - Critique permise: des décisions, des choix d'équipe, des performances. Jamais d'insulte ni d'attaque personnelle; parle des gestes, pas des personnes.
-- N'affirme rien qui ne soit pas dans la manchette fournie. N'invente aucun chiffre, score, montant ou citation.
+- N'affirme RIEN qui ne soit pas dans la manchette (ou son contexte) fournie: pas d'ambiance, pas de réaction de joueurs ou de partisans, pas de détail inventé. La légende reformule la manchette en une phrase factuelle, puis pose la question. N'invente aucun chiffre, score, montant ou citation.
 - Ne parle PAS de meubles, de produits, de prix ni de la boutique. C'est un post de jasette.
 - N'écris jamais "commente", "partage", "tague", "aime" ni "like": pas d'appât à engagement. La question seule suffit.
 - "lead": court, max 28 caractères (ex: "Tu en penses quoi?", "Franchement,", "Question du jour:").
@@ -116,7 +116,8 @@ export function validateProposal(
   if (question.length > 120) return { reason: "question trop longue pour la carte", title };
   if (lead.length > 32) return { reason: "accroche trop longue pour la carte", title };
   if (!caption || caption.length > 320) return { reason: "légende vide ou trop longue", title };
-  if (!caption.endsWith("?")) return { reason: "la légende ne finit pas par une question", title };
+  // A trailing emoji / space after the question mark is fine ("…cette année? 🏒").
+  if (!/\?[^\p{L}\p{N}?]{0,6}$/u.test(caption)) return { reason: "la légende ne finit pas par une question", title };
   if (/#\w/.test(caption)) return { reason: "hashtag dans la légende", title };
 
   const out = `${lead} ${question} ${caption}`;
