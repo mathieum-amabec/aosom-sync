@@ -2,17 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.107.68] - 2026-11-24
+## [0.5.107.70] - 2026-11-24
 
 ### Changed
 
 - **"Sujet chaud" v2 — the card now NAMES the subject, and the code checks it (still OFF by default, approval always).** Reviewed by five agents (strategy, Québec audience, risk, data sources, business). Cards used to be vague ("Gros coup du CH!"); now: (1) the model must return a `subject` that is in the headline AND on the card, and every number and mid-sentence proper noun must come from the source; an NHL score is stated by the code itself; (2) two-block card — a smaller FACT line that names the subject, then the big question; (3) two kinds of post alternating week by week: **news** (Journal de Montréal hockey/sports/spectacles, La Presse hockey/sports/arts — only dated items ≤ 30–48 h old — plus the NHL API: last Canadiens score and next game) and **calendar** (pre-written bank: pneus d'hiver, Vendredi fou, sapin, réveillon, Boxing Day, Jour de l'An, Saint-Valentin, changements d'heure, fêtes des mères/pères, 1er juillet, Halloween, thermostat — no LLM); Google Trends is now only a popularity marker; (4) blocklist in two tiers (hard + "à vérifier" soft words such as blessure/suspension/rumeur → draft flagged ⚠, never inside the post), plural/feminine forms covered, more words, harmless idioms ("mort de rire") allowed, extended engagement-bait and supplier-name checks; (5) the draft keeps its source (`facebook_drafts.topic_meta`: headline, url, date, flags, expiry) and `/drafts` shows it where you approve; (6) the publisher refuses a stale topic: `notAfter` travels into `publication_queue` and is re-checked with the hard blocklist at publish time (queue and direct "Publier"). New category "maison". Docs: `docs/HOT-TOPICS.md`.
 
-## [0.5.107.67] - 2026-11-23
+## [0.5.107.69] - 2026-11-23
 
 ### Added
 
 - **"Sujet chaud" Facebook posts (OFF by default, human approval always).** A twice-weekly cron (`/api/cron/hot-topics`, Tue + Thu 11:00 UTC) collects what Québec is talking about (Google Trends QC, La Presse Sports, Journal de Montréal Sports — free public RSS), drops anything near politics, religion, war, tragedy, crime, health or a recall (deterministic blocklist, before AND after the model), asks the strong LLM tier for one light, divisive question in tutoiement, renders a red "carte" PNG (sharp + DM Sans Bold, no AI image) and stores ONE `facebook_drafts` row with `trigger_type=hot_topic`, status `draft`. It goes through the normal approve → `publication_queue` → publisher path; nothing is approved, scheduled or published automatically. Settings: `hot_topics_mode` (off | dry | live, default off), `hot_topics_weekly_cap` (default 2); `?dry=1` forces a no-write preview; `hot_topics_last_run` keeps the audit trail. Draft TTL is 2 days (a hot topic goes stale). Treated as editorial everywhere `content_template` is (no product-JOIN fallback photo). `scripts/hot-topics-preview.mts` previews the real feeds + model and writes the card PNGs without touching the DB. Docs: `docs/HOT-TOPICS.md`.
+## [0.5.107.68] - 2026-11-23
+
+### Fixed
+
+- **Costway stock job (`costway-stock`), hardening after review of #701.** (1) It now covers every imported Costway variant that is not archived, not only `import_status = 'active'` (only `costway-publish.mts` sets that value, so a product published another way would never have been synced). (2) A variant is re-opened (0 → N) only if THIS job closed it (`settings.costway_stock_closed` = the variants whose Costway target was 0 at the previous run): a variant customers sold down to 0 while Costway still shows units is no longer re-opened before Mat has ordered them. (3) Each write is re-checked against a fresh Shopify read (chunks of 50) just before it, so a sale that landed since planning is never overwritten upward (`staleSkipped` in the result). (4) An untracked variant gets tracking switched on and its target written whether or not it is sold out. (5) `maxDuration` 300 → 800 s. (6) One alert per kind per day instead of one per run; `?force=1` bypasses the mass-zero breaker for one call.
+
+## [0.5.107.67] - 2026-11-23
+
+### Fixed
+
+- **A Costway colour sold out at Costway stayed buyable on the site (order #1155).** `costway-sync` only refreshes our own table, a variant's Shopify quantity was set once at import and never moved, `inventory-sweep` skips Costway products on purpose, and `sold-out-hide` only drafts a product when EVERY variant is unsellable. A sold-out colour of a product that still had another colour in stock therefore kept selling (a blue dehumidifier Costway had marked out of stock for days). New per-variant job `costway-stock` (`src/lib/costway/stock-sync.ts`, cron `/api/cron/costway-stock` at 16:30 and 22:30 UTC): target is 0 when Costway says out of stock, removed, or under 3 units, else the quantity capped at 50. Closing a variant is always written; a variant is re-opened only from 0 (restock), never topped back up after a sale; an untracked variant gets tracking switched on before 0 is written. Guards: no run on a costway-sync older than 30 h, mass-zero breaker (more than max(150, 40 %) of the sellable variants at once), 250 writes per run, post-write canary. Mode `settings.costway_stock_mode` = off | dry | live, default dry. First dry-run on prod: 79 variants of 62 products to close.
 
 ## [0.5.107.66] - 2026-11-21
 

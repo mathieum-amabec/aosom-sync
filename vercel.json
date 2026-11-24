@@ -228,6 +228,14 @@
       "schedule": "0 16 * * *"
     },
     {
+      "path": "/api/cron/costway-stock",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/costway-stock",
+      "schedule": "30 22 * * *"
+    },
+    {
       "path": "/api/cron/costway-reprice",
       "schedule": "45 16 * * *"
     },
