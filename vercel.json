@@ -120,6 +120,10 @@
       "schedule": "20 10,16,22 * * *"
     },
     {
+      "path": "/api/cron/draft-redirects?apply=1",
+      "schedule": "50 10,22 * * *"
+    },
+    {
       "path": "/api/cron/csv-precache",
       "schedule": "0 4 * * *"
     },
