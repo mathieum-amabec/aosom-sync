@@ -814,6 +814,13 @@ export async function updateShopifyProduct(
   // The updated product (variants + new image ids), so a caller that replaced the gallery can re-attach each
   // colour's photo — replacing images drops every variant's image link.
   const data = await response.json().catch(() => null);
+  // A DRAFT product page 404s: point its URL at its collection right away (sync, stock-check,
+  // stale-catalog, sold-out-hide all draft through here). Never throws; see draft-redirect.ts.
+  // Dynamic import: draft-redirect imports shopifyFetch from this module.
+  if (updates.status === "draft") {
+    const { redirectOnDraft } = await import("./draft-redirect");
+    await redirectOnDraft(shopifyId);
+  }
   return data?.product;
 }
 
