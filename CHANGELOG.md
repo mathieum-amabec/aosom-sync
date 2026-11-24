@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.67] - 2026-11-23
+
+### Fixed
+
+- **A Costway colour sold out at Costway stayed buyable on the site (order #1155).** `costway-sync` only refreshes our own table, a variant's Shopify quantity was set once at import and never moved, `inventory-sweep` skips Costway products on purpose, and `sold-out-hide` only drafts a product when EVERY variant is unsellable. A sold-out colour of a product that still had another colour in stock therefore kept selling (a blue dehumidifier Costway had marked out of stock for days). New per-variant job `costway-stock` (`src/lib/costway/stock-sync.ts`, cron `/api/cron/costway-stock` at 16:30 and 22:30 UTC): target is 0 when Costway says out of stock, removed, or under 3 units, else the quantity capped at 50. Closing a variant is always written; a variant is re-opened only from 0 (restock), never topped back up after a sale; an untracked variant gets tracking switched on before 0 is written. Guards: no run on a costway-sync older than 30 h, mass-zero breaker (more than max(150, 40 %) of the sellable variants at once), 250 writes per run, post-write canary. Mode `settings.costway_stock_mode` = off | dry | live, default dry. First dry-run on prod: 79 variants of 62 products to close.
+
 ## [0.5.107.66] - 2026-11-21
 
 ### Added
