@@ -28,8 +28,16 @@ describe("updateShopifyProduct draft-redirect hook", () => {
     mockFetch.mockResolvedValue(ok());
     await updateShopifyProduct("42", { status: "draft", tags: ["auto-drafted"] });
     expect(redirectOnDraft).toHaveBeenCalledWith("42");
+    await updateShopifyProduct("44", { status: "archived" });
+    expect(redirectOnDraft).toHaveBeenCalledWith("44");
     await draftShopifyProduct("43");
     expect(redirectOnDraft).toHaveBeenCalledWith("43");
+  });
+
+  it("never fails the status write when the hook throws", async () => {
+    mockFetch.mockResolvedValue(ok());
+    redirectOnDraft.mockRejectedValueOnce(new Error("boom"));
+    await expect(updateShopifyProduct("42", { status: "draft" })).resolves.toEqual({ id: 1 });
   });
 
   it("does nothing for other updates", async () => {

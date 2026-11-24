@@ -13,6 +13,7 @@ import {
   _resetInlineBudget,
   _setRateLimitMs,
   INLINE_BUDGET,
+  INLINE_TIMEOUT_MS,
 } from "@/lib/draft-redirect";
 
 const json = (body: unknown, init: { status?: number; headers?: Record<string, string> } = {}) =>
@@ -107,6 +108,7 @@ describe("pure helpers", () => {
     expect(shouldRedirect({ status: "DRAFT", tags: ["auto-drafted"] })).toBe(true);
     expect(shouldRedirect({ status: "draft", tags: [] })).toBe(true);
     expect(shouldRedirect({ status: "ACTIVE", tags: [] })).toBe(false);
+    expect(shouldRedirect({ status: "ARCHIVED", tags: [] })).toBe(true);
     expect(shouldRedirect({ status: "DRAFT", tags: ["needs-review"] })).toBe(false);
     expect(shouldRedirect({ status: "DRAFT", tags: ["internal-warranty"] })).toBe(false);
   });
@@ -189,6 +191,18 @@ describe("redirectOnDraft (inline hook)", () => {
     fakeShopify({ product: { handle: "x", title: "x", status: "ACTIVE", collections: [] } });
     for (let i = 0; i < INLINE_BUDGET; i++) await redirectOnDraft(String(i));
     await expect(redirectOnDraft("over")).resolves.toMatchObject({ status: "skipped" });
+  });
+
+  it("gives up after INLINE_TIMEOUT_MS so a slow Shopify cannot stall the caller", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(shopifyFetch).mockImplementation(() => new Promise(() => {}));
+      const p = redirectOnDraft("slow");
+      await vi.advanceTimersByTimeAsync(INLINE_TIMEOUT_MS + 10);
+      await expect(p).resolves.toMatchObject({ status: "skipped" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("can be disabled", async () => {

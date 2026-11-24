@@ -41,11 +41,20 @@ export const SKIP_TAGS = ["needs-review"];
 const MAX_CANDIDATES = 4;
 /** Spacing between Shopify calls (≤ 2 req/s, same as the other crons). */
 export const RATE_LIMIT_MS = 500;
-/** Inline (in-request) redirect creations allowed per rolling window — overflow → reconcile cron. */
-export const INLINE_BUDGET = 25;
+/**
+ * Inline (in-request) attempts allowed per rolling window, PER INSTANCE (Fluid Compute reuses
+ * instances; this bounds the extra time a mass-draft cron can spend, not a store-wide count).
+ * Overflow → reconcile cron.
+ */
+export const INLINE_BUDGET = 10;
+/** Hard cap on the time one inline attempt may add to the caller (stale-catalog, stock-check…). */
+export const INLINE_TIMEOUT_MS = 6_000;
 const INLINE_WINDOW_MS = 10 * 60_000;
 /** Default creates per reconcile run (first runs drain the historical backlog). */
 export const RECONCILE_CAP = 150;
+/** Hard ceiling for `?cap=` and the per-run time budget (route maxDuration is 800 s). */
+export const RECONCILE_MAX_CAP = 150;
+export const RECONCILE_TIME_BUDGET_MS = 650_000;
 
 let rateLimitMs = RATE_LIMIT_MS;
 /** Test hook: shorten the spacing between Shopify calls. */
@@ -83,7 +92,9 @@ export function searchFallback(title: string): string {
 
 /** Pure: should this product get a redirect at all? */
 export function shouldRedirect(p: { status: string; productType?: string | null; tags: string[] }): boolean {
-  if (p.status.toLowerCase() !== "draft") return false;
+  // DRAFT and ARCHIVED product pages both 404 on the storefront.
+  const st = p.status.toLowerCase();
+  if (st !== "draft" && st !== "archived") return false;
   if (isInternalProduct({ product_type: p.productType ?? "", tags: p.tags })) return false;
   const lower = p.tags.map((t) => t.trim().toLowerCase());
   return !SKIP_TAGS.some((t) => lower.includes(t));
@@ -231,7 +242,15 @@ export async function redirectOnDraft(shopifyId: string): Promise<DraftRedirectO
   if (inlineStamps.length >= INLINE_BUDGET) return { status: "skipped", reason: "inline budget — reconcile cron will handle it" };
   inlineStamps.push(now);
   try {
-    const out = await ensureDraftRedirect(shopifyId, { apply: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<DraftRedirectOutcome>((resolve) => {
+      timer = setTimeout(() => resolve({ status: "skipped", reason: `inline timeout ${INLINE_TIMEOUT_MS} ms — reconcile cron will handle it` }), INLINE_TIMEOUT_MS);
+    });
+    // The losing promise keeps running in the background; it only ever creates the redirect
+    // once (existing-redirect check first), so finishing late is harmless.
+    const work = ensureDraftRedirect(shopifyId, { apply: true }).catch((err): DraftRedirectOutcome => ({ status: "failed", error: err instanceof Error ? err.message : String(err) }));
+    const out = await Promise.race([work, timeout]);
+    clearTimeout(timer);
     if (out.status === "created") console.log(`[draft-redirect] ${out.path} → ${out.target}`);
     if (out.status === "failed") console.warn(`[draft-redirect] failed ${out.path}: ${out.error}`);
     return out;
@@ -283,7 +302,8 @@ export async function runDraftRedirectReconcile(
   opts: { apply?: boolean; cap?: number } = {},
 ): Promise<DraftRedirectReconcileResult> {
   const apply = opts.apply === true;
-  const cap = opts.cap ?? RECONCILE_CAP;
+  const cap = Math.min(opts.cap ?? RECONCILE_CAP, RECONCILE_MAX_CAP);
+  const startedAt = Date.now();
   const redirected = await listRedirectedProductPaths();
 
   const drafts: { id: string; handle: string; title: string; status: string; productType: string | null; tags: string[] }[] = [];
@@ -293,7 +313,7 @@ export async function runDraftRedirectReconcile(
     const d: {
       products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: { id: string; handle: string; title: string; status: string; productType: string | null; tags: string[] }[] };
     } = await gql(
-      `query($a:String){products(first:250,after:$a,query:"status:draft"){pageInfo{hasNextPage endCursor}nodes{id handle title status productType tags}}}`,
+      `query($a:String){products(first:250,after:$a,query:"status:draft OR status:archived"){pageInfo{hasNextPage endCursor}nodes{id handle title status productType tags}}}`,
       { a: after },
     );
     drafts.push(...d.products.nodes);
@@ -308,7 +328,10 @@ export async function runDraftRedirectReconcile(
     created: 0, planned: 0, failed: 0, deferred: Math.max(0, missing.length - cap), samples: [],
   };
 
+  let processed = 0;
   for (const p of missing.slice(0, cap)) {
+    if (Date.now() - startedAt > RECONCILE_TIME_BUDGET_MS) break; // leave room to report
+    processed++;
     let out: DraftRedirectOutcome;
     try {
       await sleep();
@@ -321,5 +344,6 @@ export async function runDraftRedirectReconcile(
     else if (out.status === "failed") result.failed++;
     if (result.samples.length < 30 || out.status === "failed") result.samples.push(out);
   }
+  result.deferred = missing.length - processed;
   return result;
 }

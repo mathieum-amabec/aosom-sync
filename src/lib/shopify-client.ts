@@ -817,9 +817,13 @@ export async function updateShopifyProduct(
   // A DRAFT product page 404s: point its URL at its collection right away (sync, stock-check,
   // stale-catalog, sold-out-hide all draft through here). Never throws; see draft-redirect.ts.
   // Dynamic import: draft-redirect imports shopifyFetch from this module.
-  if (updates.status === "draft") {
-    const { redirectOnDraft } = await import("./draft-redirect");
-    await redirectOnDraft(shopifyId);
+  if (updates.status === "draft" || updates.status === "archived") {
+    try {
+      const { redirectOnDraft } = await import("./draft-redirect");
+      await redirectOnDraft(shopifyId);
+    } catch (err) {
+      console.warn("[draft-redirect] hook failed:", err instanceof Error ? err.message : err);
+    }
   }
   return data?.product;
 }

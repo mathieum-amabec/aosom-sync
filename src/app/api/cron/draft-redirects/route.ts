@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const apply = params.get("apply") === "1";
   const capRaw = Number(params.get("cap"));
-  const cap = Number.isFinite(capRaw) && capRaw > 0 ? Math.min(capRaw, 400) : undefined;
+  const cap = Number.isFinite(capRaw) && capRaw > 0 ? Math.min(capRaw, 150) : undefined;
   try {
     const result = await trackCron(
       apply ? "draft-redirects" : "draft-redirects-dryrun",
