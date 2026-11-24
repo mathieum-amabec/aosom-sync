@@ -22,6 +22,7 @@ import {
   type QueuePlatform,
 } from "./database";
 import type { SocialQueuePayload } from "./queue-publisher";
+import { hotTopicBlockReason } from "./hot-topics/guard";
 
 /**
  * The branded hero image (GET /api/image-preview) is stored on a draft with locale=fr
@@ -191,6 +192,13 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   }
   const caption = meta.language === "FR" ? draft.postText : draft.postTextEn!;
 
+  // "Sujet chaud": a stale topic or a newly-blocklisted caption must never go out (direct "Publier" path).
+  if (draft.triggerType === "hot_topic") {
+    const expiresAt = typeof draft.topicMeta?.expiresAt === "number" ? draft.topicMeta.expiresAt : null;
+    const blocked = hotTopicBlockReason({ caption, expiresAt });
+    if (blocked) return { status: "error", error: blocked };
+  }
+
   const imageUrls = draftImageUrls(draft, { allowProductImage: true });
   if (imageUrls.length === 0 && isContentTemplate(draft) && !draft.videoUrl && !draft.reelsVideoUrl) {
     // Never fall back to a product photo for an editorial post: its sku is a placeholder, and
@@ -305,6 +313,8 @@ export function draftToQueueItems(
       ...(localizedUrls.length > 0 ? { imageUrls: localizedUrls, imageUrl: localizedUrls[0] } : {}),
       ...(draft.videoUrl ? { videoUrl: draft.videoUrl } : {}),
       ...(draft.reelsVideoUrl ? { reelsVideoUrl: draft.reelsVideoUrl } : {}),
+      // "Sujet chaud": the queue slot may be days away — carry the expiry so the publisher can refuse a stale topic.
+      ...(draft.triggerType === "hot_topic" && typeof draft.topicMeta?.expiresAt === "number" ? { notAfter: draft.topicMeta.expiresAt } : {}),
     };
     items.push({ platform, payload });
   }

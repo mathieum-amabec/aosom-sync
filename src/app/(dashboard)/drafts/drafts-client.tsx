@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { FacebookDraft, DraftsPage } from "@/lib/database";
+import { HotTopicSource } from "./hot-topic-source";
 import { approveDraft, rejectDraft, publishDraft } from "./actions";
 import type { PublishLanguage } from "./actions";
 import { SectionTabs, SOCIAL_SECTION_TABS } from "@/components/section-tabs";
@@ -366,6 +367,9 @@ export default function DraftsClient() {
                   )}
                 </div>
               )}
+
+              {/* Sujet chaud: the story / fact the post is built on, with its flags and expiry */}
+              {selected.triggerType === "hot_topic" && selected.topicMeta && <HotTopicSource meta={selected.topicMeta} />}
 
               {/* FR caption */}
               <div className="bg-white rounded-lg border shadow-sm p-5">

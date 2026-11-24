@@ -1,17 +1,26 @@
 /**
- * Hot-topic ("sujet chaud") post pipeline: collect → filter → write → card → draft.
+ * Hot-topic ("sujet chaud") post pipeline: pick a kind → source → write → card → draft.
+ *
+ * Two kinds of post, alternated week by week (the review's mix):
+ *  - "news": a named, fresh story or hard fact (Journal de Montréal / La Presse headlines, the NHL
+ *    score) turned into a question by the LLM, every name and number verified against the source.
+ *  - "calendar": a dated or seasonal topic from the pre-written bank (pneus d'hiver, Vendredi fou,
+ *    sapin de Noël…). No LLM, no feed — it cannot be wrong or off-brand.
  *
  * Modes (`settings.hot_topics_mode`): off (default; the cron is a no-op) | dry (collect, write and
  * render, but store NOTHING — no upload, no draft) | live (store the card + create ONE draft per run).
  * `live` never publishes anything: the draft lands as `status='draft'` and goes through the usual
- * human approval → publication_queue path. Nothing here approves, schedules or publishes.
+ * human approval → publication_queue path. Nothing here approves, schedules or publishes. The draft
+ * carries its source (`topic_meta`) so the approver sees what it is about, and an expiry that the
+ * publisher enforces (hot-topics/guard.ts).
  *
  * Caps: at most `hot_topics_weekly_cap` (default 2) non-rejected hot-topic drafts per rolling 7 days,
- * one per run, and never a topic close to one already used this week.
+ * one per run, never a topic close to one already used, and the kind not yet used this week goes first.
  */
 import { countFacebookDraftsSince, createFacebookDraft, getAnyProductSku, getSetting, setSetting } from "@/lib/database";
+import { calendarPosts } from "./calendar";
 import { collectCandidates } from "./sources";
-import { generateHotTopicPosts, type HotTopicPost } from "./generator";
+import { checkPostText, generateHotTopicPosts, rankPosts, type HotTopicPost } from "./generator";
 import { renderCardPng, uploadCardPng } from "./card";
 
 export const MODE_KEY = "hot_topics_mode";
@@ -20,9 +29,12 @@ export const RECENT_KEY = "hot_topics_recent";
 export const LAST_RUN_KEY = "hot_topics_last_run";
 export const DEFAULT_WEEKLY_CAP = 2;
 const WEEK_SEC = 7 * 86400;
+/** A calendar post is not repeated for this long. */
+const CALENDAR_REPEAT_SEC = 10 * 86400;
 const RECENT_KEEP = 40;
 
 export type HotTopicsMode = "off" | "dry" | "live";
+export type PostKind = "news" | "calendar";
 
 export function parseMode(v: string | null | undefined): HotTopicsMode {
   const m = (v ?? "").trim().toLowerCase();
@@ -34,7 +46,7 @@ export function parseCap(v: string | null | undefined): number {
   return Number.isFinite(n) && n >= 0 && n <= 14 ? n : DEFAULT_WEEKLY_CAP;
 }
 
-interface RecentTopic { title: string; at: number; draftId: number }
+interface RecentTopic { title: string; at: number; draftId: number; kind?: PostKind }
 
 function tokens(s: string): Set<string> {
   return new Set(
@@ -57,6 +69,18 @@ export function isRecentDuplicate(title: string, recent: RecentTopic[], nowSec: 
   return recent.some((r) => nowSec - r.at < WEEK_SEC && topicSimilarity(title, r.title) >= 0.4);
 }
 
+/** Calendar posts repeat only by exact key, after `CALENDAR_REPEAT_SEC`. */
+export function isRecentCalendar(key: string, recent: RecentTopic[], nowSec: number): boolean {
+  return recent.some((r) => r.title === key && nowSec - r.at < CALENDAR_REPEAT_SEC);
+}
+
+/** Which kind goes first: the one not yet used in the last 7 days (news by default). */
+export function kindOrder(recent: RecentTopic[], nowSec: number): PostKind[] {
+  const weekKinds = new Set(recent.filter((r) => nowSec - r.at < WEEK_SEC).map((r) => r.kind));
+  if (weekKinds.has("news") && !weekKinds.has("calendar")) return ["calendar", "news"];
+  return ["news", "calendar"];
+}
+
 async function readRecent(): Promise<RecentTopic[]> {
   try {
     const raw = await getSetting(RECENT_KEY);
@@ -76,21 +100,37 @@ export interface HotTopicsResult {
   rejected?: Array<{ title: string; reason: string }>;
   /** What the run chose (and, in live mode, stored). */
   chosen?: {
+    kind: PostKind;
     topic: string;
     source: string;
+    sourceUrl?: string;
+    subject?: string;
     category: string;
     divisive: number;
-    lead: string;
+    factLine: string;
     question: string;
     caption: string;
     why: string;
+    flags: string[];
+    expiresAt: number;
     cardFontSize: number;
     cardLines: string[];
     imageUrl?: string;
     draftId?: number;
   };
   /** Other valid proposals from the same run (dry-run review). */
-  alternatives?: Array<{ topic: string; question: string; caption: string }>;
+  alternatives?: Array<{ kind: PostKind; topic: string; factLine: string; question: string; caption: string }>;
+}
+
+/** A calendar post as a HotTopicPost (same shape the rest of the pipeline uses). */
+function calendarAsPost(c: ReturnType<typeof calendarPosts>[number]): HotTopicPost | null {
+  // Same validator as the LLM posts: a calendar text that fails it is a bug in the bank — never ship it.
+  if (checkPostText(c)) return null;
+  return {
+    kind: "calendar", topicKey: `calendrier:${c.id}`, source: "calendrier", sourceTitle: c.sourceNote,
+    category: c.category, divisive: 3, factLine: c.factLine, question: c.question, caption: c.caption,
+    why: c.sourceNote, flags: [], trending: false, expiresAt: c.expiresAt,
+  };
 }
 
 /** Run the pipeline. `modeOverride` can only DOWNGRADE (never turns live on): callers pass "dry". */
@@ -107,31 +147,48 @@ export async function runHotTopics(opts: { modeOverride?: "dry"; now?: Date } = 
     if (used >= cap) return { mode, skipped: `plafond hebdo atteint (${used}/${cap})` };
   }
 
-  const { candidates, feeds } = await collectCandidates();
-  if (candidates.length === 0) return { mode, feeds, candidates: 0, skipped: "aucune source n'a répondu" };
-
-  const outcome = await generateHotTopicPosts(candidates, now);
-  const base: HotTopicsResult = {
-    mode, feeds, candidates: candidates.length,
-    blockedBeforeLlm: outcome.blockedBeforeLlm, rejected: outcome.rejected,
-  };
-
   const recent = await readRecent();
-  const fresh: HotTopicPost[] = outcome.posts.filter((p) => !isRecentDuplicate(p.candidate.title, recent, nowSec));
-  if (fresh.length === 0) {
-    const result = { ...base, skipped: "aucun sujet sûr, léger et nouveau aujourd'hui" };
+  const order = kindOrder(recent, nowSec);
+
+  const calendar = calendarPosts(now)
+    .map(calendarAsPost)
+    .filter((p): p is HotTopicPost => p !== null && !isRecentCalendar(p.topicKey, recent, nowSec));
+
+  let news: HotTopicPost[] = [];
+  const base: HotTopicsResult = { mode };
+  // The news side costs an LLM call: in live mode only run it when it can actually be the choice.
+  const needNews = mode === "dry" || order[0] === "news" || calendar.length === 0;
+  if (needNews) {
+    const { candidates, feeds } = await collectCandidates(undefined, now);
+    base.feeds = feeds;
+    base.candidates = candidates.length;
+    if (candidates.length > 0) {
+      const outcome = await generateHotTopicPosts(candidates, now);
+      base.blockedBeforeLlm = outcome.blockedBeforeLlm;
+      base.rejected = outcome.rejected;
+      news = rankPosts(outcome.posts.filter((p) => !isRecentDuplicate(p.topicKey, recent, nowSec)));
+    }
+  }
+
+  const byKind: Record<PostKind, HotTopicPost[]> = { news, calendar };
+  const ranked = order.flatMap((k) => byKind[k]);
+  if (ranked.length === 0) {
+    const result = { ...base, skipped: "aucun sujet sûr, connu et nouveau aujourd'hui" };
     await recordLastRun(result, nowSec);
     return result;
   }
 
-  const best = fresh[0];
-  const { png, layout } = await renderCardPng(best.lead, best.question);
+  const best = ranked[0];
+  const { png, layout } = await renderCardPng(best.factLine, best.question);
   const chosen: NonNullable<HotTopicsResult["chosen"]> = {
-    topic: best.candidate.title, source: best.candidate.source, category: best.category,
-    divisive: best.divisive, lead: best.lead, question: best.question, caption: best.caption,
-    why: best.why, cardFontSize: layout.fontSize, cardLines: layout.lines,
+    kind: best.kind, topic: best.sourceTitle, source: best.source, ...(best.sourceUrl ? { sourceUrl: best.sourceUrl } : {}),
+    ...(best.subject ? { subject: best.subject } : {}), category: best.category, divisive: best.divisive,
+    factLine: best.factLine, question: best.question, caption: best.caption, why: best.why, flags: best.flags,
+    expiresAt: best.expiresAt, cardFontSize: layout.fontSize, cardLines: [...layout.factLines, "", ...layout.lines],
   };
-  const alternatives = fresh.slice(1).map((p) => ({ topic: p.candidate.title, question: p.question, caption: p.caption }));
+  const alternatives = ranked.slice(1).map((p) => ({
+    kind: p.kind, topic: p.sourceTitle, factLine: p.factLine, question: p.question, caption: p.caption,
+  }));
 
   if (mode === "dry") {
     const result = { ...base, chosen, alternatives };
@@ -142,15 +199,21 @@ export async function runHotTopics(opts: { modeOverride?: "dry"; now?: Date } = 
   // live — store the card, create ONE draft in status 'draft' (human approval required).
   const sku = await getAnyProductSku();
   if (!sku) throw new Error("hot-topics: catalogue vide — aucun SKU de remplacement pour le brouillon éditorial");
-  const imageUrl = await uploadCardPng(png, best.candidate.title);
+  const imageUrl = await uploadCardPng(png, best.subject ?? best.topicKey);
   const draftId = await createFacebookDraft({
     sku, triggerType: "hot_topic", language: "fr", postText: best.caption,
     imageUrl, imageUrls: [imageUrl],
+    topicMeta: {
+      kind: best.kind, topicKey: best.topicKey, source: best.source, sourceTitle: best.sourceTitle,
+      sourceUrl: best.sourceUrl ?? null, sourcePublished: best.sourcePublished ?? null, subject: best.subject ?? null,
+      category: best.category, factLine: best.factLine, question: best.question, why: best.why,
+      flags: best.flags, trending: best.trending, expiresAt: best.expiresAt,
+    },
   });
   chosen.imageUrl = imageUrl;
   chosen.draftId = draftId;
 
-  const updated: RecentTopic[] = [{ title: best.candidate.title, at: nowSec, draftId }, ...recent].slice(0, RECENT_KEEP);
+  const updated: RecentTopic[] = [{ title: best.topicKey, at: nowSec, draftId, kind: best.kind }, ...recent].slice(0, RECENT_KEEP);
   await setSetting(RECENT_KEY, JSON.stringify(updated));
 
   const result = { ...base, chosen, alternatives };
@@ -166,4 +229,3 @@ async function recordLastRun(result: HotTopicsResult, nowSec: number): Promise<v
     console.warn("[hot-topics] could not record last run:", err);
   }
 }
-

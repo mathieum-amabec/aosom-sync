@@ -1,7 +1,7 @@
 /**
  * GET /api/cron/hot-topics — "sujet chaud" Facebook post (Vercel Cron, Tue + Thu 11:00 UTC).
  *
- * Collects what Québec is talking about (Google Trends QC + local sports desks), keeps only light,
+ * Alternates a named news/fact post (Journal de Montréal, La Presse, NHL API) with a calendar-bank post; keeps only light,
  * brand-safe topics, writes one question post with a red "carte" image and stores it as a DRAFT for
  * human approval. It never approves, schedules or publishes anything.
  *

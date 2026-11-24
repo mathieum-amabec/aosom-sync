@@ -52,6 +52,7 @@ import {
 import { checkSequentialAdPrice } from "./sequential-ad-price";
 import { addUtm, tagCaptionLinks } from "./utm";
 import { assertNoMascot } from "./mascot-guard";
+import { hotTopicBlockReason } from "./hot-topics/guard";
 import { recordPartialFailure } from "./queue-partial-error";
 
 export interface SocialQueuePayload {
@@ -62,6 +63,8 @@ export interface SocialQueuePayload {
   videoUrl?: string;
   reelsVideoUrl?: string;
   link?: string;
+  /** "Sujet chaud" posts only: unix seconds after which the post is stale and must not publish. */
+  notAfter?: number;
 }
 
 export interface BlogQueuePayload {
@@ -93,9 +96,16 @@ export function parseSocialPayload(raw: unknown): SocialQueuePayload {
   const imageUrls = Array.isArray(o.imageUrls)
     ? o.imageUrls.filter((u): u is string => typeof u === "string" && u.trim() !== "")
     : undefined;
+  const notAfter = typeof o.notAfter === "number" && Number.isFinite(o.notAfter) ? o.notAfter : undefined;
+  if (notAfter !== undefined) {
+    // Every call site of this parser runs at publish time: refuse a stale / newly-blocked "sujet chaud".
+    const blocked = hotTopicBlockReason({ caption, expiresAt: notAfter });
+    if (blocked) throw new Error(blocked);
+  }
   return {
     caption,
     brand: o.brand,
+    ...(notAfter !== undefined ? { notAfter } : {}),
     imageUrl: optString(o.imageUrl),
     imageUrls: imageUrls && imageUrls.length > 0 ? imageUrls : undefined,
     videoUrl: optString(o.videoUrl),

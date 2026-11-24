@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.68] - 2026-11-24
+
+### Changed
+
+- **"Sujet chaud" v2 — the card now NAMES the subject, and the code checks it (still OFF by default, approval always).** Reviewed by five agents (strategy, Québec audience, risk, data sources, business). Cards used to be vague ("Gros coup du CH!"); now: (1) the model must return a `subject` that is in the headline AND on the card, and every number and mid-sentence proper noun must come from the source; an NHL score is stated by the code itself; (2) two-block card — a smaller FACT line that names the subject, then the big question; (3) two kinds of post alternating week by week: **news** (Journal de Montréal hockey/sports/spectacles, La Presse hockey/sports/arts — only dated items ≤ 30–48 h old — plus the NHL API: last Canadiens score and next game) and **calendar** (pre-written bank: pneus d'hiver, Vendredi fou, sapin, réveillon, Boxing Day, Jour de l'An, Saint-Valentin, changements d'heure, fêtes des mères/pères, 1er juillet, Halloween, thermostat — no LLM); Google Trends is now only a popularity marker; (4) blocklist in two tiers (hard + "à vérifier" soft words such as blessure/suspension/rumeur → draft flagged ⚠, never inside the post), plural/feminine forms covered, more words, harmless idioms ("mort de rire") allowed, extended engagement-bait and supplier-name checks; (5) the draft keeps its source (`facebook_drafts.topic_meta`: headline, url, date, flags, expiry) and `/drafts` shows it where you approve; (6) the publisher refuses a stale topic: `notAfter` travels into `publication_queue` and is re-checked with the hard blocklist at publish time (queue and direct "Publier"). New category "maison". Docs: `docs/HOT-TOPICS.md`.
+
 ## [0.5.107.67] - 2026-11-23
 
 ### Added
