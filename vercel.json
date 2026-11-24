@@ -56,6 +56,10 @@
       "schedule": "0 14 * * 1,3,5"
     },
     {
+      "path": "/api/cron/hot-topics",
+      "schedule": "0 11 * * 2,4"
+    },
+    {
       "path": "/api/cron/auto-import",
       "schedule": "*/5 7-20 * * *"
     },

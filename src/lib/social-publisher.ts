@@ -43,9 +43,9 @@ export function localizeBrandedImageUrls(urls: string[], language: "FR" | "EN"):
   });
 }
 
-/** Editorial post (content template) — not about any product; its sku is only a placeholder. */
+/** Editorial post (content template or hot topic) — not about any product; its sku is only a placeholder. */
 export function isContentTemplate(draft: Pick<FacebookDraft, "triggerType">): boolean {
-  return draft.triggerType === "content_template";
+  return draft.triggerType === "content_template" || draft.triggerType === "hot_topic";
 }
 
 /**

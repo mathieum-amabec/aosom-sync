@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.67] - 2026-11-23
+
+### Added
+
+- **"Sujet chaud" Facebook posts (OFF by default, human approval always).** A twice-weekly cron (`/api/cron/hot-topics`, Tue + Thu 11:00 UTC) collects what Québec is talking about (Google Trends QC, La Presse Sports, Journal de Montréal Sports — free public RSS), drops anything near politics, religion, war, tragedy, crime, health or a recall (deterministic blocklist, before AND after the model), asks the strong LLM tier for one light, divisive question in tutoiement, renders a red "carte" PNG (sharp + DM Sans Bold, no AI image) and stores ONE `facebook_drafts` row with `trigger_type=hot_topic`, status `draft`. It goes through the normal approve → `publication_queue` → publisher path; nothing is approved, scheduled or published automatically. Settings: `hot_topics_mode` (off | dry | live, default off), `hot_topics_weekly_cap` (default 2); `?dry=1` forces a no-write preview; `hot_topics_last_run` keeps the audit trail. Draft TTL is 2 days (a hot topic goes stale). Treated as editorial everywhere `content_template` is (no product-JOIN fallback photo). `scripts/hot-topics-preview.mts` previews the real feeds + model and writes the card PNGs without touching the DB. Docs: `docs/HOT-TOPICS.md`.
+
 ## [0.5.107.66] - 2026-11-21
 
 ### Added

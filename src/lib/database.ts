@@ -6040,7 +6040,7 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
   const db = await ensureSchema();
   // Editorial posts (content_template) carry a placeholder sku (the FK needs a products row) —
   // never join it: it labelled every editorial card "Classic Adirondack Chair" with its photo.
-  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'`;
+  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic')`;
   const args: InValue[] = [];
   if (filters?.status) { sql += ` WHERE fd.status = ?`; args.push(filters.status); }
   sql += ` ORDER BY fd.created_at DESC`;
@@ -6052,7 +6052,7 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
 export async function getFacebookDraft(id: number): Promise<FacebookDraft | null> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template' WHERE fd.id = ?`,
+    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic') WHERE fd.id = ?`,
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
@@ -7552,7 +7552,7 @@ export async function getEligibleHighlightCandidatesTrendAware(
 // The cooldown of a fiche = its most recent LIVE product draft (anything not rejected:
 // draft, approved, queued, published). Shared by the targeted and the global recompute.
 const LIVE_POST_AT = `(SELECT MAX(fd.created_at) FROM facebook_drafts fd JOIN products p2 ON p2.sku = fd.sku
-    WHERE fd.status != 'rejected' AND fd.trigger_type != 'content_template'
+    WHERE fd.status != 'rejected' AND fd.trigger_type NOT IN ('content_template', 'hot_topic')
       AND (p2.sku = products.sku
            OR (products.shopify_product_id IS NOT NULL AND p2.shopify_product_id = products.shopify_product_id)))`;
 
@@ -7986,6 +7986,17 @@ export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> 
 /** Placeholder sku for editorial (content_template) drafts, which have no product but must
  *  satisfy facebook_drafts.sku NOT NULL + FK. It is meaningless: every draft read joins
  *  products only for non-editorial drafts, and the publisher never uses its image. */
+/** Count drafts of one trigger type created since `sinceSec` (unix s), ignoring rejected ones. Used by
+ *  the hot-topic weekly cap — a rejected/expired draft frees its slot so a fresh topic can replace it. */
+export async function countFacebookDraftsSince(triggerType: string, sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM facebook_drafts WHERE trigger_type = ? AND status != 'rejected' AND created_at >= ?`,
+    args: [triggerType, sinceSec],
+  });
+  return Number(rowToObj(res.rows[0]).n ?? 0);
+}
+
 export async function getAnyProductSku(): Promise<string | null> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
@@ -8088,7 +8099,7 @@ export async function getDraftsForReview(filters: DraftFilters = {}): Promise<Dr
     db.execute({ sql: `SELECT COUNT(*) as n FROM facebook_drafts fd ${whereClause}`, args }),
     db.execute({
       sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd
-            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'
+            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic')
             ${whereClause}
             ORDER BY fd.created_at DESC
             LIMIT ? OFFSET ?`,
