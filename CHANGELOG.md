@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.68] - 2026-11-23
+
+### Fixed
+
+- **Costway stock job (`costway-stock`), hardening after review of #701.** (1) It now covers every imported Costway variant that is not archived, not only `import_status = 'active'` (only `costway-publish.mts` sets that value, so a product published another way would never have been synced). (2) A variant is re-opened (0 → N) only if THIS job closed it (`settings.costway_stock_closed` = the variants whose Costway target was 0 at the previous run): a variant customers sold down to 0 while Costway still shows units is no longer re-opened before Mat has ordered them. (3) Each write is re-checked against a fresh Shopify read (chunks of 50) just before it, so a sale that landed since planning is never overwritten upward (`staleSkipped` in the result). (4) An untracked variant gets tracking switched on and its target written whether or not it is sold out. (5) `maxDuration` 300 → 800 s. (6) One alert per kind per day instead of one per run; `?force=1` bypasses the mass-zero breaker for one call.
+
 ## [0.5.107.67] - 2026-11-23
 
 ### Fixed

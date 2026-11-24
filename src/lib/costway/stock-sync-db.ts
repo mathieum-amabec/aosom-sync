@@ -1,7 +1,7 @@
 /**
  * Production wiring for stock-sync.ts: Costway rows from Turso, live variants + inventory writes on Shopify.
  */
-import { createNotification, ensureSchema, getSetting } from "@/lib/database";
+import { createNotification, ensureSchema, getSetting, setSetting } from "@/lib/database";
 import {
   enableVariantTracking,
   getPrimaryLocationId,
@@ -16,16 +16,20 @@ import { RATE_LIMIT_MS, type CostwayStockDeps, type CostwayStockRow, type StockV
 const IDS_PER_CALL = 250;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+const CLOSED_KEY = "costway_stock_closed";
+
 /**
- * Active-import Costway variants. `import_status = 'active'` stays true for a product `sold-out-hide` drafted, so a
- * drafted product keeps its variants aligned and re-opens correctly when it is reactivated.
+ * Every imported Costway variant that is not archived. NOT `import_status = 'active'` alone: only costway-publish.mts
+ * sets it, so a product published another way would keep 'draft' here while live on Shopify and never be synced.
+ * Aligning a still-draft product is harmless. `import_status` also stays 'active' for a product `sold-out-hide`
+ * drafted, so its variants stay aligned and re-open correctly when it is reactivated.
  */
 async function loadRows(): Promise<CostwayStockRow[]> {
   const db = await ensureSchema();
   const res = await db.execute(
     `SELECT internal_sku, item_no, in_stock, qty, removed_at FROM costway_products
       WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND internal_sku IS NOT NULL
-        AND import_status = 'active'`,
+        AND COALESCE(import_status, '') != 'archived'`,
   );
   return res.rows.map((r) => ({
     internalSku: String(r.internal_sku),
@@ -40,7 +44,7 @@ async function productIds(): Promise<string[]> {
   const db = await ensureSchema();
   const res = await db.execute(
     `SELECT DISTINCT shopify_product_id AS id FROM costway_products
-      WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND import_status = 'active'`,
+      WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND COALESCE(import_status, '') != 'archived'`,
   );
   return res.rows.map((r) => String(r.id));
 }
@@ -74,6 +78,19 @@ export function defaultCostwayStockDeps(): CostwayStockDeps {
   return {
     now: () => new Date(),
     getSetting,
+    setSetting,
+    async loadClosed() {
+      try {
+        const raw = await getSetting(CLOSED_KEY);
+        const arr = raw ? (JSON.parse(raw) as unknown) : [];
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+      } catch {
+        return new Set<string>();
+      }
+    },
+    async saveClosed(skus) {
+      await setSetting(CLOSED_KEY, JSON.stringify(skus));
+    },
     async lastCostwaySyncAt() {
       const raw = await getSetting(COSTWAY_LAST_SYNC_KEY);
       if (!raw) return null;
