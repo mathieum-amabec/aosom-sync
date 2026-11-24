@@ -689,3 +689,19 @@ describe("publishQueueItem — mascot guard", () => {
     }
   });
 });
+
+describe("parseSocialPayload — hot-topic expiry (notAfter)", () => {
+  it("passes a fresh hot topic through and keeps notAfter", () => {
+    const notAfter = Math.floor(Date.now() / 1000) + 3600;
+    expect(parseSocialPayload({ caption: "Pelle ou patience?", brand: "ameublo", notAfter }).notAfter).toBe(notAfter);
+  });
+  it("refuses an expired hot topic at publish time", () => {
+    expect(() => parseSocialPayload({ caption: "Pelle ou patience?", brand: "ameublo", notAfter: Math.floor(Date.now() / 1000) - 60 })).toThrow(/périmé/);
+  });
+  it("refuses a hot topic whose caption now hits the blocklist", () => {
+    expect(() => parseSocialPayload({ caption: "Après le procès, trop payé?", brand: "ameublo", notAfter: Math.floor(Date.now() / 1000) + 3600 })).toThrow(/liste noire/);
+  });
+  it("does not add notAfter to ordinary payloads", () => {
+    expect(parseSocialPayload({ caption: "x", brand: "ameublo" })).not.toHaveProperty("notAfter");
+  });
+});

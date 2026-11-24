@@ -30,7 +30,7 @@ describe("GET /api/cron/draft-ttl", () => {
     const res = await GET(auth());
     expect(res.status).toBe(200);
     // new_product keeps its week; editorial + stock-highlight drafts now expire too (they piled up).
-    expect(expireMock).toHaveBeenCalledWith({ new_product: 7, content_template: 14, stock_highlight: 14 });
+    expect(expireMock).toHaveBeenCalledWith({ new_product: 7, content_template: 14, stock_highlight: 14, hot_topic: 2 });
     expect(recMock).toHaveBeenCalledWith("draft-ttl", "success", "expired=85");
     expect(await res.json()).toEqual({ success: true, expired: 85 });
   });

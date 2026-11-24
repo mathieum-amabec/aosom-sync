@@ -1310,6 +1310,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("unsplash_image_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_image_url TEXT`);
   if (!cols.has("unsplash_photographer")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_photographer TEXT`);
   if (!cols.has("unsplash_photographer_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_photographer_url TEXT`);
+  // topic_meta: JSON audit of a "sujet chaud" draft (source headline/url/date, flags, expiry) — shown at approval, re-checked before publish
+  if (!cols.has("topic_meta")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN topic_meta TEXT`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -5724,6 +5726,8 @@ export interface FacebookDraft {
   unsplashImageUrl: string | null;
   unsplashPhotographer: string | null;
   unsplashPhotographerUrl: string | null;
+  /** "Sujet chaud" drafts: source headline / url / date, sensitive flags, expiry (see hot-topics/run.ts). */
+  topicMeta?: Record<string, unknown> | null;
   productName?: string; productImage?: string;
 }
 
@@ -5920,6 +5924,16 @@ export async function seedHooksIfEmpty(): Promise<void> {
   );
 }
 
+function parseTopicMeta(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 function mapDraft(row: Record<string, unknown>): FacebookDraft {
   let channels: Record<string, ChannelState> = {};
   const raw = row.channels;
@@ -5966,6 +5980,7 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     reviewedBy: (row.reviewed_by as string) || null,
     reviewNotes: (row.review_notes as string) || null,
     unsplashImageUrl: (row.unsplash_image_url as string) || null,
+    topicMeta: parseTopicMeta(row.topic_meta),
     unsplashPhotographer: (row.unsplash_photographer as string) || null,
     unsplashPhotographerUrl: (row.unsplash_photographer_url as string) || null,
     videoUrl: (row.video_url as string) || null,
@@ -6006,14 +6021,16 @@ export async function createFacebookDraft(draft: {
   unsplashImageUrl?: string | null;
   unsplashPhotographer?: string | null;
   unsplashPhotographerUrl?: string | null;
+  /** "Sujet chaud" audit blob (JSON-serialisable): source, flags, expiry. */
+  topicMeta?: Record<string, unknown> | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const urls = (draft.imageUrls ?? []).filter((u) => typeof u === "string" && u.length > 0);
   const primary = draft.imageUrl ?? urls[0] ?? null;
   const urlsJson = urls.length > 0 ? JSON.stringify(urls) : null;
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, video_url, reels_video_url, old_price, new_price, hook_id, unsplash_image_url, unsplash_photographer, unsplash_photographer_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.videoUrl ?? null, draft.reelsVideoUrl ?? null, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null, draft.unsplashImageUrl ?? null, draft.unsplashPhotographer ?? null, draft.unsplashPhotographerUrl ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, video_url, reels_video_url, old_price, new_price, hook_id, unsplash_image_url, unsplash_photographer, unsplash_photographer_url, topic_meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.videoUrl ?? null, draft.reelsVideoUrl ?? null, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null, draft.unsplashImageUrl ?? null, draft.unsplashPhotographer ?? null, draft.unsplashPhotographerUrl ?? null, draft.topicMeta ? JSON.stringify(draft.topicMeta) : null],
   });
   return Number(result.lastInsertRowid);
 }
@@ -6040,7 +6057,7 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
   const db = await ensureSchema();
   // Editorial posts (content_template) carry a placeholder sku (the FK needs a products row) —
   // never join it: it labelled every editorial card "Classic Adirondack Chair" with its photo.
-  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'`;
+  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic')`;
   const args: InValue[] = [];
   if (filters?.status) { sql += ` WHERE fd.status = ?`; args.push(filters.status); }
   sql += ` ORDER BY fd.created_at DESC`;
@@ -6052,7 +6069,7 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
 export async function getFacebookDraft(id: number): Promise<FacebookDraft | null> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template' WHERE fd.id = ?`,
+    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic') WHERE fd.id = ?`,
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
@@ -7552,7 +7569,7 @@ export async function getEligibleHighlightCandidatesTrendAware(
 // The cooldown of a fiche = its most recent LIVE product draft (anything not rejected:
 // draft, approved, queued, published). Shared by the targeted and the global recompute.
 const LIVE_POST_AT = `(SELECT MAX(fd.created_at) FROM facebook_drafts fd JOIN products p2 ON p2.sku = fd.sku
-    WHERE fd.status != 'rejected' AND fd.trigger_type != 'content_template'
+    WHERE fd.status != 'rejected' AND fd.trigger_type NOT IN ('content_template', 'hot_topic')
       AND (p2.sku = products.sku
            OR (products.shopify_product_id IS NOT NULL AND p2.shopify_product_id = products.shopify_product_id)))`;
 
@@ -7986,6 +8003,17 @@ export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> 
 /** Placeholder sku for editorial (content_template) drafts, which have no product but must
  *  satisfy facebook_drafts.sku NOT NULL + FK. It is meaningless: every draft read joins
  *  products only for non-editorial drafts, and the publisher never uses its image. */
+/** Count drafts of one trigger type created since `sinceSec` (unix s), ignoring rejected ones. Used by
+ *  the hot-topic weekly cap — a rejected/expired draft frees its slot so a fresh topic can replace it. */
+export async function countFacebookDraftsSince(triggerType: string, sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM facebook_drafts WHERE trigger_type = ? AND status != 'rejected' AND created_at >= ?`,
+    args: [triggerType, sinceSec],
+  });
+  return Number(rowToObj(res.rows[0]).n ?? 0);
+}
+
 export async function getAnyProductSku(): Promise<string | null> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
@@ -8088,7 +8116,7 @@ export async function getDraftsForReview(filters: DraftFilters = {}): Promise<Dr
     db.execute({ sql: `SELECT COUNT(*) as n FROM facebook_drafts fd ${whereClause}`, args }),
     db.execute({
       sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd
-            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'
+            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type NOT IN ('content_template', 'hot_topic')
             ${whereClause}
             ORDER BY fd.created_at DESC
             LIMIT ? OFFSET ?`,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { FacebookDraft, DraftsPage } from "@/lib/database";
+import { HotTopicSource } from "./hot-topic-source";
 import { approveDraft, rejectDraft, publishDraft } from "./actions";
 import type { PublishLanguage } from "./actions";
 import { SectionTabs, SOCIAL_SECTION_TABS } from "@/components/section-tabs";
@@ -29,12 +30,14 @@ const STATUS_COLORS: Record<string, string> = {
 const TRIGGER_LABELS: Record<string, string> = {
   stock_highlight: "Produit",
   content_template: "Contenu",
+  hot_topic: "Sujet chaud",
   new_product: "Nouveau produit",
 };
 
 const TRIGGER_COLORS: Record<string, string> = {
   stock_highlight: "bg-green-100 text-green-800",
   content_template: "bg-blue-100 text-blue-800",
+  hot_topic: "bg-red-100 text-red-800",
   new_product: "bg-purple-100 text-purple-800",
 };
 
@@ -237,6 +240,7 @@ export default function DraftsClient() {
           className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="content_template">Contenu</option>
+          <option value="hot_topic">Sujets chauds</option>
           <option value="products">Produits</option>
           <option value="">Tous</option>
         </select>
@@ -363,6 +367,9 @@ export default function DraftsClient() {
                   )}
                 </div>
               )}
+
+              {/* Sujet chaud: the story / fact the post is built on, with its flags and expiry */}
+              {selected.triggerType === "hot_topic" && selected.topicMeta && <HotTopicSource meta={selected.topicMeta} />}
 
               {/* FR caption */}
               <div className="bg-white rounded-lg border shadow-sm p-5">
