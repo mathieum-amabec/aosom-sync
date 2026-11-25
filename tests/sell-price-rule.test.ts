@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSellPrice, estimatedAosomPrice, floorPrice, hasSignatureEnding, netProfit, profitFloor, roundDownTo88, roundDownTo99, roundUpTo88, signaturePrice } from "@/lib/sell-price-rule";
+import { computeSellPrice, estimatedAosomPrice, floorPrice, hasSignatureEnding, isShedType, netProfit, profitFloor, roundDownTo88, roundDownTo99, roundUpTo88, shedMarginFloor, signaturePrice, withProfitFloor } from "@/lib/sell-price-rule";
 
 describe("roundDownTo99", () => {
   it("rounds down to the nearest .99, never up", () => {
@@ -118,5 +118,53 @@ describe("profitFloor (list price, after card fees)", () => {
   });
   it("is about cost × 1.05 + 0.31 $ (no discount assumed any more)", () => {
     expect(profitFloor(100)).toBe(105.88);
+  });
+});
+
+describe("sheds — 25 % margin floor (Mat, 2026-11-24)", () => {
+  const SHED = "Patio & Garden > Lawn & Garden > Sheds";
+  const margin = (price: number, cost: number) => (price - cost) / price;
+
+  it("recognises every shed type, with or without NBSP, and nothing else", () => {
+    expect(isShedType(SHED)).toBe(true);
+    expect(isShedType("Patio & Garden > Lawn & Garden > Sheds > Portable Shed")).toBe(true);
+    expect(isShedType("Patio\u00a0&\u00a0Garden > Lawn & Garden > Sheds > Outdoor Storage Cabinet")).toBe(true);
+    expect(isShedType("Patio & Garden > Patio Furniture > Deck Box & Outdoor Storage")).toBe(false);
+    expect(isShedType("Patio & Garden > Lawn & Garden > Greenhouses")).toBe(false);
+    expect(isShedType(undefined)).toBe(false);
+  });
+
+  it("the floor gives at least 25 % margin and ends in .88; NaN for non-sheds / unknown cost", () => {
+    for (const cost of [117.5, 141.72, 292.77, 393.27, 576.96]) {
+      const f = shedMarginFloor(cost, SHED);
+      expect(margin(f, cost)).toBeGreaterThanOrEqual(0.25 - 1e-9);
+      expect(Math.round((f % 1) * 100)).toBe(88);
+    }
+    expect(shedMarginFloor(200, "Home Furnishings > Sofas")).toBeNaN();
+    expect(shedMarginFloor(null, SHED)).toBeNaN();
+    expect(shedMarginFloor(0, SHED)).toBeNaN();
+  });
+
+  it("raises a shed priced at cost × 1.15 (13 %) to 25 %, reason margin", () => {
+    const r = computeSellPrice({ aosomPrice: 314.99, cost: 333.9, productType: SHED });
+    expect(r.reason).toBe("margin");
+    expect(margin(r.price, 333.9)).toBeGreaterThanOrEqual(0.25 - 1e-9);
+    expect(r.price).toBeGreaterThan(computeSellPrice({ aosomPrice: 314.99, cost: 333.9 }).price);
+  });
+
+  it("leaves other products on the usual rule, and a shed already above the floor alone", () => {
+    expect(computeSellPrice({ aosomPrice: 204.99, cost: 222.2, productType: "Home Furnishings > Sofas" })).toEqual({ price: 255.88, reason: "estimate", competitorIgnored: false });
+    const hi = computeSellPrice({ aosomPrice: 900, cost: 400, productType: SHED });
+    expect(hi.reason).not.toBe("margin");
+  });
+
+  it("applies when the feed has no public price too (price 0 + cost)", () => {
+    const r = computeSellPrice({ aosomPrice: 0, cost: 200, productType: SHED });
+    expect(margin(r.price, 200)).toBeGreaterThanOrEqual(0.25 - 1e-9);
+  });
+
+  it("withProfitFloor keeps the shed floor after a discount cap lowered the price", () => {
+    const capped = withProfitFloor({ price: 250, reason: "floor", competitorIgnored: false }, 240, SHED);
+    expect(margin(capped.price, 240)).toBeGreaterThanOrEqual(0.25 - 1e-9);
   });
 });
