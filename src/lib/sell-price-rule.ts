@@ -157,7 +157,7 @@ export function computeSellPrice(input: SellPriceInput): SellPriceResult {
     // every other product — the estimate of Aosom's price, never under the profit floor — instead of going live at 0 $
     // (2026-11-19: 10 imports sat quarantined at 0 $). No cost either: nothing to price from.
     if (!Number.isFinite(estimate)) return { price: NaN, reason: "floor", competitorIgnored: false };
-    return withProfitFloor({ price: estimate, reason: "estimate", competitorIgnored: false }, cost);
+    return withProfitFloor({ price: estimate, reason: "estimate", competitorIgnored: false }, cost, input.productType);
   }
   // Cost unknown: the frozen Aosom price, as it is.
   if (!Number.isFinite(estimate)) return { price: round2(aosomPrice), reason: "floor", competitorIgnored: false };
@@ -165,12 +165,38 @@ export function computeSellPrice(input: SellPriceInput): SellPriceResult {
   const res: SellPriceResult = estimate >= floor
     ? { price: estimate, reason: "estimate", competitorIgnored: false }
     : { price: floor, reason: "floor", competitorIgnored: false };
-  return withProfitFloor(res, cost);
+  return withProfitFloor(res, cost, input.productType);
 }
 
-/** Raises a price to `profitFloor(cost)` when it sits below it (reason "profit"). Unknown cost: unchanged. */
-export function withProfitFloor(res: SellPriceResult, cost: number | null | undefined): SellPriceResult {
+/**
+ * Minimum margin on the PRICE for garden sheds ("cabanons" / "remises de jardin"), Mat 2026-11-24: "25 % pour toutes les
+ * remises et cabanons". These are bulky, heavy, return-prone items: at the usual cost × 1.15 (13 % margin) one return
+ * (delivery + 10 %) eats the profit. Margin = (price - cost) / price, the same reading as the import margin gate.
+ */
+export const SHED_MIN_MARGIN = 0.25;
+const SHED_TYPE_RE = /Lawn & Garden > Sheds/i;
+
+/** True for the Aosom shed types (Sheds, Sheds > Portable Shed, Sheds > Outdoor Storage Cabinet…). Tolerates NBSP in the feed. */
+export function isShedType(productType: string | null | undefined): boolean {
+  return typeof productType === "string" && SHED_TYPE_RE.test(productType.replace(/ /g, " "));
+}
+
+/** Lowest price that gives a shed at least SHED_MIN_MARGIN on `cost`, in our .88. NaN for any other product or an unknown cost. */
+export function shedMarginFloor(cost: number | null | undefined, productType: string | null | undefined): number {
+  if (!isShedType(productType)) return NaN;
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost <= 0) return NaN;
+  return roundUpTo88(cost / (1 - SHED_MIN_MARGIN));
+}
+
+/**
+ * Raises a price to the shed margin floor (reason "margin") then to `profitFloor(cost)` (reason "profit") when it sits below
+ * them. Unknown cost: unchanged. `productType` is only needed for the shed floor.
+ */
+export function withProfitFloor(res: SellPriceResult, cost: number | null | undefined, productType?: string | null): SellPriceResult {
+  let out = res;
+  const shed = shedMarginFloor(cost, productType);
+  if (Number.isFinite(out.price) && Number.isFinite(shed) && out.price < shed - 0.005) out = { ...out, price: shed, reason: "margin" };
   const min = profitFloor(cost);
-  if (!Number.isFinite(res.price) || !Number.isFinite(min) || res.price >= min - 0.005) return res;
-  return { ...res, price: min, reason: "profit" };
+  if (!Number.isFinite(out.price) || !Number.isFinite(min) || out.price >= min - 0.005) return out;
+  return { ...out, price: min, reason: "profit" };
 }

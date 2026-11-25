@@ -109,7 +109,8 @@ export function planSellPrices(
       res.price = Math.max(floor, signaturePrice(roundDownTo88(r.maxPrice)));
       res.reason = res.price <= floor ? "floor" : res.reason;
       // ...but never at a loss either: profitability beats keeping a crossed price.
-      Object.assign(res, withProfitFloor(res, r.cost));
+      // (and sheds keep their 25 % margin floor: a crossed price does not beat it either)
+      Object.assign(res, withProfitFloor(res, r.cost, r.productType));
     }
     if (res.competitorIgnored) plan.competitorIgnored++;
     // The lowest acceptable price: the Aosom floor, and the profit floor when our cost is known.
