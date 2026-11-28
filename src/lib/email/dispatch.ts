@@ -110,8 +110,10 @@ export async function dispatchEvent(
 
   const msg = directEmail(event, email, props, idemKey);
   if (!msg) {
-    console.warn(`[email] ${event}: data incomplete, no email (Resend)`);
-    return { ok: true, via: "none", skipped: true, error: "données incomplètes" };
+    // NOT ok: a caller that "marks notified when ok" (waitlist, price alerts) must keep the item and log it, never
+    // stamp an email that did not go out
+    console.error(`[email] ${event}: data incomplete, no email (Resend)`);
+    return { ok: false, via: "none", skipped: true, error: "données incomplètes" };
   }
   let out: SendOutcome;
   try {

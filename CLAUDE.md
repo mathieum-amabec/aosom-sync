@@ -886,6 +886,13 @@ Mat chose the FREE route over a paid Klaviyo plan (free Klaviyo = 250 active pro
   neither buyers nor subscribers (Klaviyo or Shopify), older than 14 days, with no cart/checkout/wheel event in 7 days;
   `--apply` SUPPRESSES them (reversible, `--undo <backup>`; never deletes). Dry run 2026-11-27: 252 active / 250, 21 to
   suppress → 231. Also counts the Shopify subscribers whose Klaviyo profile is suppressed (41, 40 of them on 2026-11-13).
+- **Klaviyo `USER_SUPPRESSED` = our own housekeeping** (2026-11-13 clean-up, `klaviyo-headroom --apply`, our unsubscribe
+  push): it does NOT block an email we send through Resend (`suppressionBlocks` in `src/lib/email/consent.ts`, used by
+  the engine, the cart reminder and `referral-launch --via resend`). Opt-outs (consent UNSUBSCRIBED, bounces,
+  complaints) still block, and `email_suppressions` is checked before every marketing email.
+- **Kill switches with `resend`:** only `email_provider` stops the engine. `relance_paiement_enabled = "0"` then stops
+  only the 15 $ code reminder, and `flow_relay_enabled` has no effect (the relays already stand down).
+- Referral launch via Resend: prefer `--per-day 40` (tier 3 = 60 % of 95/day, shared with welcome / price drop).
 - ⚠️ **Needs Mat's explicit OK:** setting `email_provider`, any `--apply`, any Resend/DNS/Vercel change.
 
 

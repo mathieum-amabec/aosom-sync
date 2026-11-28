@@ -12,6 +12,20 @@ All notable changes to Aosom Sync will be documented in this file.
   - **Back-in-stock email showed the raw English supplier title**; it now shows the French storefront title (Shopify), and drops the unsupported « Les quantités peuvent partir vite ».
   - **Price-drop email (Resend) had a French footer on English emails**; the footer now follows the email's language.
   - The English cart and checkout reminders said « Ameublo Direct »; the EN brand is « Furnish Direct ».
+  - **Our own Klaviyo housekeeping suppression no longer blocks emails we send ourselves.** The 2026-11-13 clean-up (and
+    `klaviyo-headroom --apply`) suppressed profiles with reason `USER_SUPPRESSED` to stay under the free plan's 250 —
+    40 of them are Shopify email subscribers. Through Resend that reason no longer blocks (engine consent, cart
+    reminder, referral launch `--via resend`: eligible 222 → 263); unsubscribes, bounces and complaints still do, and our
+    own unsubscribes are re-checked in Turso before every marketing email.
+  - The cart reminder's « checkout reminder sent in the last 72 h » rule now also sees the engine's reminder #1
+    (with `email_provider` = resend, relance-paiement no longer records it).
+  - Price-alert confirmation, back-in-stock confirmation and price-drop emails show the French storefront title, not
+    the raw English supplier title; the confirmation links' fallback host is `outils.ameublodirect.ca`, never the
+    vercel.app name.
+  - `dispatchEvent` answers `ok: false` when an email's data is incomplete, so the waitlist / price alerts keep the item
+    instead of stamping it notified.
+  - A wheel spin whose Turso row cannot be written (Resend mode) falls back to the Klaviyo event, which the engine also
+    reads, instead of never getting its 3 code emails.
 
 ## [0.5.107.74] - 2026-11-28
 

@@ -278,3 +278,28 @@ describe("follow-up spacing (two chains crossing)", () => {
     expect(Object.keys(r.skipped).some((k) => k.endsWith(":espacement"))).toBe(true);
   });
 });
+
+describe("our own Klaviyo housekeeping suppression (USER_SUPPRESSED)", () => {
+  it("does not block an email we send ourselves; the person's own opt-outs still do", async () => {
+    const { suppressionBlocks } = await import("@/lib/email/consent");
+    const { klaviyoBlocks } = await import("@/lib/referral/launch");
+    const { subscriptionAllows } = await import("@/lib/cart-relay");
+    const admin = [{ reason: "USER_SUPPRESSED", timestamp: "2026-11-13T00:00:00Z" }];
+    expect(suppressionBlocks(admin)).toBe(false);
+    expect(suppressionBlocks([{ reason: "HARD_BOUNCE" }])).toBe(true);
+    expect(suppressionBlocks([...admin, { reason: "SPAM_COMPLAINT" }])).toBe(true);
+    expect(parseKlaviyoConsent({ data: { attributes: { subscriptions: { email: { marketing: { consent: "NEVER_SUBSCRIBED", suppression: admin } } } } } }).suppressed).toBe(false);
+    // referral launch: blocked through Klaviyo, allowed when we send it (Resend)
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: admin })).toBe(true);
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: admin }, { ownEmail: true })).toBe(false);
+    expect(klaviyoBlocks({ consent: "UNSUBSCRIBED", suppression: admin }, { ownEmail: true })).toBe(true);
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: [{ reason: "HARD_BOUNCE" }] }, { ownEmail: true })).toBe(true);
+    // cart reminder: Klaviyo reports can_receive false for an admin-suppressed profile
+    const sub = (consent: string, suppression: unknown[], can = false) => ({ email: { marketing: { consent, suppression, can_receive_email_marketing: can } } });
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", admin))).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", admin), { ownEmail: true })).toBe(true);
+    expect(subscriptionAllows(sub("UNSUBSCRIBED", admin), { ownEmail: true })).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", [], false), { ownEmail: true })).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", [], true), { ownEmail: true })).toBe(true);
+  });
+});

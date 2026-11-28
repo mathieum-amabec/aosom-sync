@@ -3480,6 +3480,7 @@ export interface TriggeredPriceAlert {
   currentPrice: number;
   productName: string | null;
   shopifyHandle: string | null;
+  shopifyProductId?: string | null;
 }
 
 /**
@@ -3548,7 +3549,8 @@ export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> 
   const db = await ensureSchema();
   const result = await db.execute(
     `SELECT a.id, a.email, a.sku, a.price_at_signup,
-            p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle
+            p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle,
+            p.shopify_product_id AS shopify_product_id
      FROM price_alerts a
      JOIN products p ON p.sku = a.sku
      WHERE a.notified_at IS NULL AND a.confirmed = 1 AND p.price < a.price_at_signup`,
@@ -3561,6 +3563,7 @@ export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> 
     currentPrice: Number(r.current_price),
     productName: (r.product_name as string) || null,
     shopifyHandle: (r.shopify_handle as string) || null,
+    shopifyProductId: r.shopify_product_id != null && r.shopify_product_id !== "" ? String(r.shopify_product_id) : null,
   }));
 }
 

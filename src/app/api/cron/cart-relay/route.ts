@@ -14,6 +14,7 @@ import {
 } from "@/lib/klaviyo-campaigns";
 import { RETRY_LATER, defaultEngineDeps, loadEngineConfig, sendEmail } from "@/lib/email/engine";
 import { routeFor } from "@/lib/email/dispatch";
+import { loadEngineStateForRelays, mergeEngineIntoRelance } from "@/lib/email/flows";
 
 /**
  * GET /api/cron/cart-relay — every 30 min. Emails identified shoppers who ADDED TO CART and neither
@@ -90,12 +91,15 @@ async function run(dryRun: boolean) {
 
   let relanceProfiles: Record<string, string> = {};
   try { relanceProfiles = (JSON.parse((await getSetting(RELANCE_STATE_KEY)) ?? "{}") as { profiles?: Record<string, string> }).profiles ?? {}; } catch { /* none */ }
+  // the engine's checkout reminder #1 (email_provider "resend": relance-paiement no longer sends it) blocks a cart email too
+  relanceProfiles = mergeEngineIntoRelance({ profiles: relanceProfiles }, await loadEngineStateForRelays(getSetting).catch(() => null)).profiles ?? relanceProfiles;
 
   const remainingToday = Math.max(0, MAX_PER_DAY - state.sentLog.length);
   const base: Omit<SelectCtx, "canEmail" | "limit"> = { state, relanceProfiles, checkoutAfter: after(checkoutTimes), orderedAfter: after(orderTimes) };
   // pass 1: every rule except consent → only those profiles are looked up in Klaviyo
   const first = selectCarts(events, { ...base, canEmail: () => true, limit: 1000 }, now);
-  const info = await fetchProfileInfo(first.send.map((c) => c.profileId));
+  const cfg = await loadEngineConfig(getSetting);
+  const info = await fetchProfileInfo(first.send.map((c) => c.profileId), { ownEmail: routeFor(cfg) === "resend" });
   const { send, skipped } = selectCarts(events, {
     ...base, canEmail: (pid) => info.get(pid)?.allowed === true, profileLocale: (pid) => info.get(pid)?.locale ?? null,
     limit: Math.min(MAX_PER_RUN, remainingToday),
@@ -111,7 +115,6 @@ async function run(dryRun: boolean) {
 
   const results: Array<{ locale: string; sent: number; campaignId?: string; error?: string }> = [];
   // email_provider = "resend": one email per cart through our engine, same selection, caps and bookkeeping
-  const cfg = await loadEngineConfig(getSetting);
   if (send.length && routeFor(cfg) === "resend") {
     const deps = await defaultEngineDeps(cfg.apiKey);
     for (const c of send) {

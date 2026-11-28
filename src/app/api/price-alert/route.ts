@@ -14,11 +14,13 @@ import { identifyProfile } from "@/lib/klaviyo-client";
 import { currentRoute, dispatchEvent } from "@/lib/email/dispatch";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { getPublicAppUrl } from "@/lib/config";
+import { getShopifyProductTitle } from "@/lib/shopify-client";
 
 export const runtime = "nodejs";
 
 const TOKEN_TTL_SECONDS = 24 * 60 * 60; // confirmation link valid 24h
-const PUBLIC_BASE_FALLBACK = "https://aosom-sync.vercel.app";
+// our own alias: the vercel.app name carries the supplier name, it must never appear in a customer email
+const PUBLIC_BASE_FALLBACK = "https://outils.ameublodirect.ca";
 
 // Storefront origins allowed to POST here.
 const ALLOWED_ORIGINS = new Set([
@@ -116,7 +118,8 @@ export async function POST(request: Request) {
     const sent = await dispatchEvent("Price Alert Confirmation", email, {
       confirm_url: confirmUrl,
       sku,
-      product_name: (product.name as string) || sku,
+      // products.name is the raw ENGLISH supplier title: the email shows the French storefront title (empty → generic wording)
+      product_name: product.shopify_product_id ? await getShopifyProductTitle(String(product.shopify_product_id), "") : "",
       price: baselinePrice,
     }, { idemKey: `alerte-prix-confirmation:${confirmToken}`, maxDelayH: 20 });
     if (!sent.ok) {

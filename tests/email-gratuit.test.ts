@@ -183,6 +183,9 @@ describe("dispatchEvent: one call, Klaviyo or Resend", () => {
     send.mockResolvedValueOnce({ status: "skipped", reason: "suppressed" } as never);
     expect(await dispatchEvent(PRICE_ALERT_CONFIRM_EVENT, "c@x.ca", { confirm_url: "https://outils.ameublodirect.ca/api/price-alert/confirm?token=t", product_name: "Lit" }, {}, d))
       .toMatchObject({ ok: true, skipped: true, error: "suppressed" });
+    // data the email needs is missing (a link off our hosts): NOT ok, so the caller keeps the item instead of stamping it
+    expect(await dispatchEvent(PRICE_ALERT_CONFIRM_EVENT, "c@x.ca", { confirm_url: "https://admin.shopify.com/x", product_name: "Lit" }, {}, d))
+      .toMatchObject({ ok: false, via: "none", error: "données incomplètes" });
   });
 
   it("the default idem key is stable for the same data and differs otherwise", () => {
