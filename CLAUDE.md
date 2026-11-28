@@ -600,6 +600,41 @@ App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysi
   7. QA: set `merci_offer_test_emails` to a test email, place a real order, check timer/code/checkout, then
      cancel/refund it. Go live with `merci_offer_enabled` = "1" only on Mat's OK.
 
+## Parrainage (built 2026-11-27, OFF until Mat says so)
+
+Variante A approved by Mat: unique Shopify discount codes, never store credit (store credit stacks with everything and
+the margin guard cannot bound it). Code: `src/lib/referral/` (`rules.ts` pure: codes, discount inputs, anti-fraud;
+`credits.ts` the cron engine with injected deps; `store.ts` Turso; `shopify.ts`; `launch.ts`).
+
+- **Codes** (all: fixed amount once per order, minimum 10 × the amount → the margin guard reads exactly 10 % =
+  `MAX_DISCOUNT`; combine with shipping discounts only; title starts with the code):
+  - per customer `MERCI10-XXXXXX` 10 $ dès 100 $ (sous-total avant taxes), 1 use, 60 days;
+  - per customer `AMI-XXXXXX` 10 $ dès 100 $, up to 10 uses, once per customer, 90 days, meant for a friend's first
+    order (Shopify cannot restrict that; the cron only credits a first order);
+  - referrer credit: a new `MERCI10-` 10 $ dès 100 $, 60 days, max 5 per referrer (a revoked credit frees its slot).
+- **Cron `GET /api/cron/referral-credits`** (hourly, :25; Bearer CRON_SECRET; in-process, never a self-fetch): orders of
+  the last 72 h with an `AMI-` code, each decided ONCE in `referral_uses` (row reserved 'pending' under a claim before any
+  code exists → `credited` / `rejected` + reason; later `revoked`). Anti-fraud (`evaluateReferral`, tested): paid and not
+  cancelled/refunded/test, friend's first order (prior orders by customer or email), normalised email (gmail dots/+tags),
+  phone and shipping address ≠ the referrer's (stored hashes + the referrer's live Shopify addresses). Not paid yet →
+  nothing written, looked at again next hour. A failed read decides nothing. Then up to 25 credits are re-checked: friend
+  refunded/cancelled and credit unused → `discountCodeDeactivate` + `revoked`. A 'pending' row older than 1 h means a run
+  crashed between reserving and recording — reported (`BLOQUÉS=`), never auto-retried (no double credit).
+- **Email 2** (« Votre ami a commandé ») = Klaviyo event **`Parrainage — crédit`** on the referrer (code, montant,
+  minimum, expire_le, langue — nothing about the friend, Loi 25) → a flow Mat builds from `docs/klaviyo/parrainage-credit.html`.
+- **Switch `settings.referral_mode`** = off | dry | live, **default off**; `?mode=` overrides one call. dry = same plan,
+  reported, zero writes (no Turso row, no Shopify code, no Klaviyo event).
+- **Tables:** `referrals` (customer, email, langue, codes, credits, phone/address as salted hashes, `klaviyo_synced`),
+  `referral_uses` (order, verdict, reason, credit code).
+- **Launch:** `scripts/referral-launch.mts` — dry run by default (eligible = buyers of the last 2 years [CASL business
+  relationship] + email subscribers, minus Shopify unsubscribed/redacted/invalid and Klaviyo unsubscribed/suppressed; a
+  Klaviyo lookup error excludes). `--apply --list-fr <id> --list-en <id>` creates both codes per customer, writes
+  `referrals`, sets the Klaviyo profile property `parrainage` {code, code_ami, langue, code_expire, code_ami_expire}
+  and adds the profile to the FR/EN list (no consent change). Re-runnable. Email 1 = a campaign Mat sends to those
+  lists from `docs/klaviyo/parrainage-merci.html`.
+- ⚠️ **Needs Mat's explicit OK:** running the launch with `--apply`; creating the Klaviyo lists, the flow and sending the
+  campaign; setting `referral_mode` to `dry` then `live`. Never name the friend in any email; never name a supplier.
+
 ## Pastilles de couleur = photo de la couleur (2026-10-18)
 
 Mat: « la pastille de couleur n'avait aucun rapport avec l'image ». Audit of the 1,023 multi-colour products (3 vision

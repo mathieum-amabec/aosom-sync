@@ -1,0 +1,56 @@
+<!--
+  Parrainage — courriel 1 « Un petit merci » (campaign, sent BY MAT from Klaviyo to the lists filled by
+  scripts/referral-launch.mts). One template, two languages: the block shown follows the profile property
+  parrainage.langue set by the launch script ("en" → English, anything else → French).
+
+  FR  Objet   : Un petit merci de notre part : 10 $ pour vous
+      Aperçu  : Et 10 $ à offrir à quelqu'un que vous aimez.
+  EN  Subject : A little thank-you from us: $10 for you
+      Preview : And $10 to give to someone you care about.
+
+  Profile properties used: parrainage.code (MERCI10-…), parrainage.code_ami (AMI-…), parrainage.code_expire,
+  parrainage.code_ami_expire. Never name a supplier in this copy.
+-->
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/></head>
+<body style="margin:0;background:#FAFAF8">
+<table cellpadding="0" cellspacing="0" role="presentation" style="background:#FAFAF8" width="100%"><tr><td align="center" style="padding:24px 12px">
+<table cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;background:#fff;border:1px solid rgba(27,42,74,.08);border-radius:10px;overflow:hidden" width="600">
+{% if person|lookup:'parrainage'|lookup:'langue' == 'en' %}
+<tr><td style="background:#1B2A4A;padding:18px 28px"><span style="font-family:Georgia,serif;font-size:20px;color:#fff;font-weight:700">Furnish Direct</span></td></tr>
+<tr><td style="padding:24px 28px 8px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#1B2A4A">Thank you for choosing us</h1></td></tr>
+<tr><td style="padding:0 0 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Thank you for choosing Furnish Direct. We are a small local business here in Québec, and every order counts for us. Here is a little something in return: <b>$10 off your next purchase</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Your code</p></td></tr>
+<tr><td style="padding:0 0 14px"><span style="display:inline-block;border:2px dashed #C17F3E;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ person|lookup:'parrainage'|lookup:'code' }}</span></td></tr>
+<tr><td style="padding:0 0 22px"><a href="https://furnishdirect.ca/discount/{{ person|lookup:'parrainage'|lookup:'code' }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Shop now</a></td></tr>
+<tr><td style="padding:0 0 10px"><h2 style="margin:0;font-family:Georgia,serif;font-size:19px;line-height:1.3;color:#1B2A4A">And $10 to give away</h2></td></tr>
+<tr><td style="padding:0 0 12px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Know someone looking for a piece of furniture? Give them this code: they get <b>$10 off their first order</b>, and when they order, we send you <b>$10 more</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Code to give a friend</p></td></tr>
+<tr><td style="padding:0 0 20px"><span style="display:inline-block;border:2px dashed #1B2A4A;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ person|lookup:'parrainage'|lookup:'code_ami' }}</span></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Thank you again,<br/>The Furnish Direct team</p></td></tr>
+<tr><td style="padding:0 0 8px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#797068">$10 off an order of $100 or more (before taxes). One use per code and per customer, cannot be combined with other discounts (free or discounted shipping still applies). Your code is valid until {{ person|lookup:'parrainage'|lookup:'code_expire' }}; the friend code until {{ person|lookup:'parrainage'|lookup:'code_ami_expire' }}, for a friend's first order. Referral reward: up to 5 friends, sent by email once your friend's order is paid, cancelled if that order is refunded.</p></td></tr>
+</table></td></tr>
+<tr><td style="background:#FAFAF8;padding:18px 28px;border-top:1px solid #ece6df">
+<p style="margin:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#797068">Furnish Direct · Québec, Canada · {% unsubscribe 'Unsubscribe' %}</p></td></tr>
+{% else %}
+<tr><td style="background:#1B2A4A;padding:18px 28px"><span style="font-family:Georgia,serif;font-size:20px;color:#fff;font-weight:700">Ameublo Direct</span></td></tr>
+<tr><td style="padding:24px 28px 8px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#1B2A4A">Merci de nous avoir choisis</h1></td></tr>
+<tr><td style="padding:0 0 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Merci d'avoir choisi Ameublo Direct. Nous sommes une petite entreprise d'ici, au Québec, et chaque commande compte pour nous. Voici un petit quelque chose en retour : <b>10 $ sur votre prochain achat</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Votre code</p></td></tr>
+<tr><td style="padding:0 0 14px"><span style="display:inline-block;border:2px dashed #C17F3E;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ person|lookup:'parrainage'|lookup:'code' }}</span></td></tr>
+<tr><td style="padding:0 0 22px"><a href="https://ameublodirect.ca/discount/{{ person|lookup:'parrainage'|lookup:'code' }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Magasiner</a></td></tr>
+<tr><td style="padding:0 0 10px"><h2 style="margin:0;font-family:Georgia,serif;font-size:19px;line-height:1.3;color:#1B2A4A">Et 10 $ à offrir</h2></td></tr>
+<tr><td style="padding:0 0 12px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Vous connaissez quelqu'un qui cherche un meuble? Offrez-lui ce code : il aura <b>10 $ sur sa première commande</b>, et quand il commandera, on vous envoie <b>10 $ de plus</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Code à offrir</p></td></tr>
+<tr><td style="padding:0 0 20px"><span style="display:inline-block;border:2px dashed #1B2A4A;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ person|lookup:'parrainage'|lookup:'code_ami' }}</span></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Encore merci,<br/>L'équipe Ameublo Direct</p></td></tr>
+<tr><td style="padding:0 0 8px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#797068">10 $ sur une commande de 100 $ ou plus (avant taxes). 1 utilisation par code et par client, non cumulable avec d'autres rabais (livraison incluse). Votre code est valide jusqu'au {{ person|lookup:'parrainage'|lookup:'code_expire' }}; le code à offrir jusqu'au {{ person|lookup:'parrainage'|lookup:'code_ami_expire' }}, pour la première commande d'un ami. Crédit parrain : jusqu'à 5 amis, envoyé par courriel une fois la commande de l'ami payée, annulé si cette commande est remboursée.</p></td></tr>
+</table></td></tr>
+<tr><td style="background:#FAFAF8;padding:18px 28px;border-top:1px solid #ece6df">
+<p style="margin:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#797068">Ameublo Direct · Québec, Canada · {% unsubscribe 'Se désabonner' %}</p></td></tr>
+{% endif %}
+</table>
+</td></tr></table>
+</body></html>
