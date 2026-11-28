@@ -28,7 +28,7 @@ Klaviyo continue de servir pour une chose : il **voit** ce qui se passe dans Sho
 - **Désabonnement en 1 clic** dans chaque courriel, conforme à la loi anti-pourriel (LCAP) :
   - la personne est retirée chez nous, dans Klaviyo et dans Shopify ;
   - Shopify Email ne lui écrira donc plus non plus.
-- **Chaque courriel affiche l'expéditeur et l'adresse postale**, comme la loi l'exige.
+- **Chaque courriel affiche l'expéditeur et un lien de désabonnement.** L'adresse postale est facultative (avis de l'avocat de Mat, 2026-11-28 : entreprise en dropshipping sans local) ; si le réglage est vide, elle n'apparaît pas.
 
 ---
 
@@ -91,7 +91,7 @@ Va dans **Vercel → projet aosom-sync → Settings → Environment Variables**,
 
 Ensuite :
 1. Clique sur **Redeploy** sur le dernier déploiement de production.
-2. Dans le tableau de bord de l'application, panneau **Courriels**, remplis **l'adresse postale du pied de page** : ta case postale, par exemple « C.P. 123, Saint-Hubert QC J3Y 0A1 ». La loi l'exige. Sans elle, l'application refuse d'envoyer.
+2. Dans le tableau de bord de l'application, panneau **Courriels**, l'**adresse postale du pied de page** est facultative : laisse-la vide pour n'en afficher aucune.
 
 Quand tout est bon, le panneau n'affiche plus « À faire avant le premier envoi ».
 
@@ -111,7 +111,6 @@ Quand tout est bon, le panneau n'affiche plus « À faire avant le premier envoi
       - le rapport du matin du lendemain.
    4. Vérifie dans chaque courriel :
       - l'expéditeur « Ameublo Direct » ;
-      - l'adresse postale ;
       - le lien « Se désabonner », qui doit fonctionner (il retire ton adresse : remets-la avec moi après le test) ;
       - qu'il n'est pas arrivé dans les indésirables.
 3. **Bascule** (1 clic). Clique sur **Resend (gratuit)** et confirme. À partir de là :

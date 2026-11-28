@@ -536,7 +536,7 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
   - **Skill-testing question** (Criminal Code s.206, approved by Mat 2026-10-19): the form asks « a + b × c = ? »
     (random small operands). The snippet checks it and draws a new one on a wrong answer; the server re-checks it
     with `isSkillAnswerCorrect` and answers 400 `skill` otherwise.
-  - CASL mailing address: Mat will get a PO box (case postale); add it to the form and the 3 emails once he sends it.
+  - Mailing address in emails: NOT required (Mat's lawyer, 2026-11-28 — dropshipping business, no premises). The email engine's `email_mailing_address` setting is optional; empty = no address in the footer. Don't re-raise it.
 
 ## Offre de remerciement (thank-you page) — V1 built 2026-11-21, OFF until Mat says so
 

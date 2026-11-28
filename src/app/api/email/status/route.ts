@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     }
     case "address": {
       const v = String(b.value ?? "").replace(/\s+/g, " ").trim();
-      if (v.length < 10 || v.length > 200) return bad("Adresse postale : 10 à 200 caractères");
+      if (v.length > 200) return bad("Adresse postale : 200 caractères maximum (vide = aucune adresse)");
       await setSetting(ADDRESS_KEY, v);
       break;
     }
