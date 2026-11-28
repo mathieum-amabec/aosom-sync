@@ -828,6 +828,47 @@ async function _initSchemaImpl(): Promise<void> {
       expires_at INTEGER,
       created_at INTEGER NOT NULL
     )`,
+    // Programme de parrainage: one row per enrolled customer (scripts/referral-launch.mts). Their personal MERCI10-
+    // code, their AMI- code to give a friend, and how many referrer credits they earned (max 5). Phone and address
+    // are kept only as salted hashes (Loi 25), for the self-referral check. See src/lib/referral/.
+    `CREATE TABLE IF NOT EXISTS referrals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id TEXT UNIQUE,
+      email_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      lang TEXT NOT NULL CHECK (lang IN ('fr', 'en')),
+      personal_code TEXT,
+      personal_discount_id TEXT,
+      personal_expires_at INTEGER,
+      friend_code TEXT UNIQUE,
+      friend_discount_id TEXT,
+      friend_expires_at INTEGER,
+      credits INTEGER NOT NULL DEFAULT 0,
+      phone_hashes TEXT,
+      address_hashes TEXT,
+      source TEXT,
+      klaviyo_synced INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`,
+    // One row per friend order carrying an AMI- code, written ONCE: 'pending' is reserved under a random claim before
+    // any Shopify code exists (an hourly double-fire cannot credit twice), then 'credited' / 'rejected' (+ reason),
+    // and later 'revoked' when the friend was refunded before the referrer used the credit.
+    `CREATE TABLE IF NOT EXISTS referral_uses (
+      order_id TEXT PRIMARY KEY,
+      order_name TEXT,
+      friend_code TEXT NOT NULL,
+      referral_id INTEGER,
+      verdict TEXT NOT NULL CHECK (verdict IN ('pending', 'credited', 'rejected', 'revoked')),
+      reason TEXT,
+      claim TEXT,
+      credit_code TEXT,
+      credit_discount_id TEXT,
+      credit_expires_at INTEGER,
+      notified INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_referral_uses_referral ON referral_uses(referral_id, verdict)`,
     // "Bientôt" teasers (Vois-le chez toi, Ameublo décorateur): anonymous interest events, no PII. visitor_hash is
     // a hash of a random id the browser keeps, so unique visitors can be counted. See src/lib/teaser.ts.
     // source = where the shopper met the teaser ("pdp" photo pill, "sheet" link inside it, "chat" assistant button),

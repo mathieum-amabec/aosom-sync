@@ -1,0 +1,48 @@
+<!--
+  Parrainage — courriel 2 « Votre ami a commandé » (FLOW, trigger = metric « Parrainage — crédit », sent by
+  /api/cron/referral-credits to the REFERRER once the friend's order is paid). One template, two languages, chosen by
+  event.langue ("en" → English, anything else → French).
+
+  FR  Objet   : Votre ami a commandé : voici vos 10 $
+      Aperçu  : Merci d'avoir parlé de nous.
+  EN  Subject : Your friend placed an order: here is your $10
+      Preview : Thank you for telling people about us.
+
+  Event properties: code (MERCI10-…), montant (10), minimum (100), expire_le (date in the referrer's language), langue.
+  Loi 25: the event carries NOTHING about the friend, and this email must never name them. Never name a supplier.
+-->
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/></head>
+<body style="margin:0;background:#FAFAF8">
+<table cellpadding="0" cellspacing="0" role="presentation" style="background:#FAFAF8" width="100%"><tr><td align="center" style="padding:24px 12px">
+<table cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;background:#fff;border:1px solid rgba(27,42,74,.08);border-radius:10px;overflow:hidden" width="600">
+{% if event.langue == 'en' %}
+<tr><td style="background:#1B2A4A;padding:18px 28px"><span style="font-family:Georgia,serif;font-size:20px;color:#fff;font-weight:700">Furnish Direct</span></td></tr>
+<tr><td style="padding:24px 28px 8px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#1B2A4A">Your friend placed an order</h1></td></tr>
+<tr><td style="padding:0 0 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Someone you gave your code to just placed their first order with us. Thank you for telling people about us: for a small local business, it means a lot. As promised, here is <b>${{ event.montant|default:'10' }} off your next purchase</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Your code</p></td></tr>
+<tr><td style="padding:0 0 14px"><span style="display:inline-block;border:2px dashed #C17F3E;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ event.code }}</span></td></tr>
+<tr><td style="padding:0 0 22px"><a href="https://furnishdirect.ca/discount/{{ event.code }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Shop now</a></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Your friend code still works for other friends.<br/><br/>Thank you,<br/>The Furnish Direct team</p></td></tr>
+<tr><td style="padding:0 0 8px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#797068">${{ event.montant|default:'10' }} off an order of ${{ event.minimum|default:'100' }} or more (before taxes). One use, cannot be combined with other discounts (free or discounted shipping still applies). Valid until {{ event.expire_le }}. Referral rewards: up to 5 friends. This reward is cancelled if your friend's order is refunded before you use it.</p></td></tr>
+</table></td></tr>
+<tr><td style="background:#FAFAF8;padding:18px 28px;border-top:1px solid #ece6df">
+<p style="margin:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#797068">Furnish Direct · Québec, Canada · {% unsubscribe 'Unsubscribe' %}</p></td></tr>
+{% else %}
+<tr><td style="background:#1B2A4A;padding:18px 28px"><span style="font-family:Georgia,serif;font-size:20px;color:#fff;font-weight:700">Ameublo Direct</span></td></tr>
+<tr><td style="padding:24px 28px 8px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#1B2A4A">Votre ami a commandé</h1></td></tr>
+<tr><td style="padding:0 0 16px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Une personne à qui vous avez offert votre code vient de passer sa première commande chez nous. Merci d'avoir parlé de nous : pour une petite entreprise d'ici, ça compte beaucoup. Comme promis, voici <b>{{ event.montant|default:'10' }} $ sur votre prochain achat</b>.</p></td></tr>
+<tr><td style="padding:0 0 6px"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;color:#797068">Votre code</p></td></tr>
+<tr><td style="padding:0 0 14px"><span style="display:inline-block;border:2px dashed #C17F3E;border-radius:6px;padding:10px 18px;font-family:'Courier New',monospace;font-size:20px;font-weight:700;color:#1B2A4A;letter-spacing:1px">{{ event.code }}</span></td></tr>
+<tr><td style="padding:0 0 22px"><a href="https://ameublodirect.ca/discount/{{ event.code }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Magasiner</a></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Votre code à offrir fonctionne toujours pour d'autres amis.<br/><br/>Merci encore,<br/>L'équipe Ameublo Direct</p></td></tr>
+<tr><td style="padding:0 0 8px"><p style="margin:0;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;color:#797068">{{ event.montant|default:'10' }} $ sur une commande de {{ event.minimum|default:'100' }} $ ou plus (avant taxes). 1 utilisation, non cumulable avec d'autres rabais (livraison incluse). Valide jusqu'au {{ event.expire_le }}. Crédit parrain : jusqu'à 5 amis. Ce crédit est annulé si la commande de votre ami est remboursée avant que vous l'utilisiez.</p></td></tr>
+</table></td></tr>
+<tr><td style="background:#FAFAF8;padding:18px 28px;border-top:1px solid #ece6df">
+<p style="margin:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#797068">Ameublo Direct · Québec, Canada · {% unsubscribe 'Se désabonner' %}</p></td></tr>
+{% endif %}
+</table>
+</td></tr></table>
+</body></html>

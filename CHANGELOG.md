@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.72] - 2026-11-27
+
+### Added
+
+- **Programme de parrainage (OFF by default, approved design « variante A »).** Unique Shopify discount codes, never store credit (it stacks and escapes the margin guard). Per customer: `MERCI10-XXXXXX` 10 $ dès 100 $ (1 use, 60 days) and `AMI-XXXXXX` 10 $ dès 100 $ for a friend (10 uses, once per customer, 90 days); every code is a fixed amount once per order with a 100 $ minimum (the margin guard reads exactly 10 %) and combines with shipping discounts only. Hourly cron `/api/cron/referral-credits` (in-process) reads the last 72 h of orders carrying an `AMI-` code, decides each order ONCE (table `referral_uses`, reserved under a claim before any code exists), and when the friend's order is paid, a first order, and not from the referrer (normalised email, phone, shipping address vs stored hashes and the referrer's live Shopify addresses), gives the referrer a new `MERCI10-` code (max 5) and fires the Klaviyo event `Parrainage — crédit` (never names the friend). A friend refunded before the credit is used → the credit is deactivated and its slot freed. Mode `settings.referral_mode` = off | dry | live (default off), `?mode=` per call. Launch script `scripts/referral-launch.mts` (dry run by default; `--apply` creates the codes, writes `referrals`, sets the Klaviyo `parrainage` profile property and FR/EN list membership without changing consent). Email templates `docs/klaviyo/parrainage-merci.html` and `parrainage-credit.html` (FR + EN « Furnish Direct »). New tables `referrals`, `referral_uses`.
+
 ## [0.5.107.71] - 2026-11-24
 
 ### Changed
