@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
 import { setSetting } from "@/lib/database";
-import { trackEvent } from "@/lib/klaviyo-client";
+import { dispatchEvent } from "@/lib/email/dispatch";
 import { REPORT_LOCAL_HOUR, localClock } from "@/lib/morning-report";
 import { runPublishCheck, type PublishCheckResult } from "@/lib/publish-check";
 import { isPublisherPaused } from "@/lib/automation-controls";
@@ -54,7 +54,8 @@ export async function GET(request: Request) {
         if (!result.ok) {
           const recipient = env.morningReportEmail;
           if (recipient) {
-            await trackEvent(KLAVIYO_ALERT_METRIC, recipient, {
+            // Klaviyo event, or the email itself through Resend (settings email_provider, src/lib/email/dispatch.ts)
+            await dispatchEvent(KLAVIYO_ALERT_METRIC, recipient, {
               subject: `⚠️ Publications des dernières 24 h: ${result.problems.length} problème(s)`,
               body: result.problems.join("\n"),
             }).catch(() => undefined);

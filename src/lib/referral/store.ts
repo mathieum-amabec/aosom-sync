@@ -92,6 +92,15 @@ export async function markKlaviyoSynced(id: number): Promise<void> {
   await db.execute({ sql: `UPDATE referrals SET klaviyo_synced = 1 WHERE id = ?`, args: [id] });
 }
 
+/**
+ * Courriel 1 queued in email_outbox for Resend (referral-launch.mts --via resend) instead of a Klaviyo profile:
+ * klaviyo_synced = 2, so neither path picks this customer up again.
+ */
+export async function markEmail1Queued(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE referrals SET klaviyo_synced = 2 WHERE id = ?`, args: [id] });
+}
+
 /** Customer ids and email keys already enrolled (the launch script skips them). */
 export async function enrolledKeys(): Promise<{ customerIds: Set<string>; emailKeys: Set<string> }> {
   const db = await ensureSchema();

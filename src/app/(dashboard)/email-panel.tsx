@@ -5,6 +5,9 @@ import { useState, useEffect } from "react";
 /** Mirrors GET /api/email/status. */
 interface EmailStatus {
   mode: "off" | "test" | "live";
+  provider?: "klaviyo" | "test" | "resend";
+  route?: "klaviyo" | "test" | "resend";
+  quota?: { sent24h: number; dailyCap: number; sent30d: number; monthlyCap: number; outbox: Record<string, number> };
   problems: string[];
   testRecipients: string[];
   mailingAddress: string;
@@ -14,6 +17,7 @@ interface EmailStatus {
 }
 
 const MODE: Record<EmailStatus["mode"], string> = { off: "Éteint", test: "Test", live: "En marche" };
+const PROVIDER: Record<NonNullable<EmailStatus["provider"]>, string> = { klaviyo: "Klaviyo (actuel)", test: "Test Resend (mon adresse)", resend: "Resend (gratuit)" };
 const GROUP: Record<string, string> = {
   relance: "Paiement abandonné",
   bienvenue: "Bienvenue (infolettre)",
@@ -91,7 +95,23 @@ export function EmailPanel() {
 
           <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl text-sm space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-gray-400 mr-1">Interrupteur :</span>
+              <span className="text-gray-400 mr-1">Qui envoie tous les courriels :</span>
+              {(["klaviyo", "test", "resend"] as const).map((p) => (
+                <button key={p} disabled={busy || s.provider === p}
+                  onClick={() => (p === "resend" && !window.confirm("Tous les courriels automatiques partiront par Resend et Klaviyo arrêtera de les envoyer. Confirmer ?") ? undefined : post({ action: "provider", provider: p }))}
+                  className={`px-3 py-1.5 rounded-lg border ${s.provider === p ? "border-white text-white" : "border-gray-700 text-gray-300 hover:border-gray-500"} disabled:opacity-60`}>
+                  {PROVIDER[p]}
+                </button>
+              ))}
+            </div>
+            {s.provider && s.route && s.provider !== s.route && (
+              <p className="text-amber-300">Configuration incomplète : les courriels passent encore par Klaviyo.</p>
+            )}
+            {s.quota && (
+              <p className="text-gray-400">Resend : {s.quota.sent24h}/{s.quota.dailyCap} en 24 h · {s.quota.sent30d}/{s.quota.monthlyCap} en 30 jours · en attente : {Object.values(s.quota.outbox).reduce((a, b) => a + b, 0)}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-gray-400 mr-1">Interrupteur (ancien, groupe par groupe) :</span>
               {(["off", "test", "live"] as const).map((m) => (
                 <button key={m} disabled={busy || s.mode === m}
                   onClick={() => (m === "live" ? setConfirmLive(true) : post({ action: "mode", mode: m }))}

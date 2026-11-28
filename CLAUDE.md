@@ -338,6 +338,10 @@ Pinterest Ads Manager → Conversions) gates both halves; unset ⇒ inert no-op 
 
 ## Meta DPA retargeting — "Retargeting DPA — ViewContent + ATC" (campaign ACTIVE; ATC ad set rebuilt 2026-07-19)
 
+⚠️ **Every Meta ad is PAUSED since 2026-11-27** (Mat's decision: the last active campaign `52607877306205`, 140 $/day,
+was paused and verified). Relaunch planned in the spring for garden sheds / remises / pergolas. The ad sets below
+describe the structure, not what is running today.
+
 Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. Built by
 `scripts/rebuild-dpa-retargeting.mjs` (dry-run default, `--apply`). Replaced the old generic
 "Visiteurs 30j" website CA (built on the WRONG pixel `2027065584856990`).
@@ -465,7 +469,10 @@ A bigger one needs `MAX_DISCOUNT` raised first (which raises every floor).
 
 Audit: 53 % of traffic is Meta in-app mobile, conversion 0.03 %. Applied with `scripts/theme-perf-mobile/apply.mjs`
 (exact-string edits on the FRESH live asset, idempotent; backup theme `164084482153` « BACKUP avant perf mobile 2026-11-04 »).
-- **Wheel off:** `layout/theme.liquid` no longer renders `lc-roue` (the snippet and `/api/roue` stay). Re-add the render line to restore.
+- **Wheel — back ON since 2026-11-27** (Meta ads paused that day, so the in-app traffic that motivated the removal is gone):
+  `layout/theme.liquid` on the live theme `164805705833` renders `lc-roue` again. On phone/tablet (≤ 1024 px) it opens by
+  itself ONLY on the home page; on phone (≤ 749 px) its tab is hidden on collection pages as on product pages, because the
+  mid-height tab covered « Filtrer et trier ». (It was off from 2026-11-04 to 11-27.)
 - **Assistant off:** `lc-assistant-widget` is no longer rendered (fab hidden since 10-24, ~1 message/week in `assistant_ip_daily`);
   the « Demandez à Ameublo » button in `lc-pdp-qa` went with it.
 - **Visualiser teaser off:** `main-product` no longer renders `lc-visualiser` (« Voyez-le chez vous — BIENTÔT »).
@@ -478,7 +485,7 @@ Audit: 53 % of traffic is Meta in-app mobile, conversion 0.03 %. Applied with `s
 - First product image: `loading=eager fetchpriority=high` (`product-thumbnail`). The UGC reel starts its videos only near the
   viewport (its observer used `root: track`, so the homepage downloaded a 3 MB mp4 on load).
 
-## Roue de bienvenue (2026-10-19 — turned OFF 2026-11-04, see « Perf mobile » above)
+## Roue de bienvenue (2026-10-19 — off 2026-11-04, back ON 2026-11-27, see « Perf mobile » above)
 
 One spin wheel replaces the homepage newsletter popup (`entry_popup`, BIENVENUE20). Mat's goal: « le plus de
 conversions possible ». Plan: 1) build it on a DRAFT theme; 2) publish only on Mat's « publie », then measure for 4
@@ -493,7 +500,8 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
   in the same order, because the server returns the index.
 - **Code:** unique `ROUE-XXXXXX`, a DiscountCodeBasic with usageLimit 1, valid 72 h, combining with shipping only.
   The snippet auto-applies it through `/discount/CODE`.
-- **Klaviyo:**
+- **Klaviyo** (with `email_provider` = resend: none of this — the spin, the ticked box and `email_via='resend'` stay in
+  Turso and our engine sends the 3 code emails, see « Courriel gratuit »):
   - the consent box is OPTIONAL (CASL: consent cannot be a condition of playing). Ticked → the visitor is subscribed
     to the list « Roue de bienvenue (site) », NOT the newsletter list, so the Welcome Series and its BIENVENUE20 don't
     fire as well. Unticked → nothing goes to Klaviyo (no subscribe, no event, no `klaviyo.identify`); the visitor
@@ -620,8 +628,11 @@ the margin guard cannot bound it). Code: `src/lib/referral/` (`rules.ts` pure: c
   nothing written, looked at again next hour. A failed read decides nothing. Then up to 25 credits are re-checked: friend
   refunded/cancelled and credit unused → `discountCodeDeactivate` + `revoked`. A 'pending' row older than 1 h means a run
   crashed between reserving and recording — reported (`BLOQUÉS=`), never auto-retried (no double credit).
-- **Email 2** (« Votre ami a commandé ») = Klaviyo event **`Parrainage — crédit`** on the referrer (code, montant,
-  minimum, expire_le, langue — nothing about the friend, Loi 25) → a flow Mat builds from `docs/klaviyo/parrainage-credit.html`.
+- **Email 2** (« Votre ami a commandé ») goes through `dispatchEvent("Parrainage — crédit", …)` (src/lib/email/dispatch.ts):
+  with `email_provider` = klaviyo it is the Klaviyo event **`Parrainage — crédit`** on the referrer (code, montant, minimum,
+  expire_le, langue — nothing about the friend, Loi 25) → a flow Mat builds from `docs/klaviyo/parrainage-credit.html`
+  (⚠️ native Klaviyo flows have never sent on this account except X49Zbn); with `email_provider` = resend the email itself
+  goes out through Resend (`direct.ts`, idem key `parrainage-credit:<code>`, priority 0, queued if the cap is reached).
 - **Switch `settings.referral_mode`** = off | dry | live, **default off**; `?mode=` overrides one call. dry = same plan,
   reported, zero writes (no Turso row, no Shopify code, no Klaviyo event).
 - **Tables:** `referrals` (customer, email, langue, codes, credits, phone/address as salted hashes, `klaviyo_synced`),
@@ -631,7 +642,10 @@ the margin guard cannot bound it). Code: `src/lib/referral/` (`rules.ts` pure: c
   Klaviyo lookup error excludes). `--apply --list-fr <id> --list-en <id>` creates both codes per customer, writes
   `referrals`, sets the Klaviyo profile property `parrainage` {code, code_ami, langue, code_expire, code_ami_expire}
   and adds the profile to the FR/EN list (no consent change). Re-runnable. Email 1 = a campaign Mat sends to those
-  lists from `docs/klaviyo/parrainage-merci.html`.
+  lists from `docs/klaviyo/parrainage-merci.html`. **`--via resend --per-day N`** (default 50, max 90) instead: no Klaviyo
+  at all, courriel 1 (unique codes per customer — Shopify Email cannot do that) is queued in `email_outbox`, one slice per
+  day at 14:00 UTC, idem key `parrainage-merci:<referral id>`, `referrals.klaviyo_synced = 2`. Refused unless
+  `email_provider` = resend (the queue only drains then).
 - ⚠️ **Needs Mat's explicit OK:** running the launch with `--apply`; creating the Klaviyo lists, the flow and sending the
   campaign; setting `referral_mode` to `dry` then `live`. Never name the friend in any email; never name a supplier.
 
@@ -834,6 +848,47 @@ zero errors. Verify with
   the weekly cap. Any miss leaves the article a draft.
 - Blog IDs: FR `90302349417` (*Actualités*), EN `91161428073` (*Blog*).
 
+## Courriel gratuit — un seul aiguillage `settings.email_provider` (built 2026-11-27, default `klaviyo` = unchanged)
+
+Mat chose the FREE route over a paid Klaviyo plan (free Klaviyo = 250 active profiles, then it blocks every send;
+500 emails/month). Guide for Mat: `docs/EMAIL-GRATUIT.md`. Engine details: `docs/EMAIL-ENGINE.md`.
+
+- **`email_provider`** = `klaviyo` (default, today's behaviour, the legacy `email_engine_mode`/takeover still apply) |
+  `test` (Klaviyo keeps mailing customers; Resend mails ONLY `email_test_recipients`, every flow) | `resend` (every
+  automatic email through Resend, the Klaviyo relays stand down). Set from the dashboard email panel (`POST
+  /api/email/status {action:"provider"}`, refused while configuration is missing); entering `resend` stamps
+  `email_provider_since`. **A non-klaviyo provider with any configuration problem behaves as `klaviyo`** (`routeFor`).
+- **What moves with `resend`:** flow emails (roue 1-3, bienvenue 1-2, baisse de prix, checkout reminders 1-2) = engine
+  `/api/cron/email-flows`; checkout reminder #2 with the 15 $ code = still decided by `relance-paiement` (Shopify code)
+  but sent by Resend; cart reminder = `cart-relay` sends by Resend; morning report, publication alert, price-alert and
+  back-in-stock confirmations/alerts, referral credit = `dispatchEvent()` (`src/lib/email/dispatch.ts`, templates in
+  `direct.ts`) instead of `trackEvent`. flow-relay owns nothing any more (`allRelayKeys`).
+- **Resend free = 100/day, 3,000/month.** `sendEmail` checks the cap before claiming an email (`email_daily_cap` default
+  95, `email_monthly_cap` 2900). Priority tiers (`TIER_SHARE`): 0 transactional + wheel codes + referral credit (100 %),
+  1 cart/checkout (90 %), 2 reviews (75 %), 3 other marketing incl. referral launch (60 %). Over the cap: flow emails are
+  retried next run inside their grace window; direct emails wait in **`email_outbox`** (drained by email-flows, highest
+  priority first, expiry per email). Same idem key in `email_sends`, the outbox and Resend's Idempotency-Key: never twice.
+- **Profiles out of Klaviyo (`resend`):** `/api/roue` writes the ticked box to **`email_consents`** (always, whatever the
+  provider) and `wheel_spins.consent/email_via='resend'`, and sends NOTHING to Klaviyo; the engine reads those spins
+  from Turso (`wheel-source.ts`, pid `email:<address>`, orders matched by email). Price-alert / waitlist skip
+  `identifyProfile`. ⚠️ Shopify-originated triggers (Checkout Started, Added to Cart, Placed Order, newsletter
+  subscriptions) STILL come from Klaviyo's Shopify integration — that is what still creates ~35 profiles/week; only the
+  sending left Klaviyo. Disconnecting that sync needs Shopify webhooks as trigger source first (not built).
+- **Unsubscribes:** one-click link in every email (CASL/RFC 8058) → `email_suppressions` + `email_consents` → pushed to
+  Klaviyo AND, once the provider left `klaviyo`, to the Shopify customer (`email_suppressions.in_shopify`, so Shopify
+  Email campaigns skip them). Pushing the wheel's SUBSCRIBED consent to Shopify (creates customers) only with
+  `settings.email_consent_to_shopify` = "1" — off by default because Klaviyo's Shopify sync would copy every new customer
+  back into Klaviyo.
+- **General campaigns** (Boxing Day, seasons) = **Shopify Email** (10,000/month free with Shopify Basic, Shopify consent),
+  never Resend (100/day). Shopify Email cannot carry a unique code per customer — that is why referral courriel 1 uses
+  Resend (`referral-launch.mts --via resend --per-day N`).
+- **Klaviyo headroom until the switch:** `scripts/klaviyo-headroom.mts` (dry run by default) lists active profiles that are
+  neither buyers nor subscribers (Klaviyo or Shopify), older than 14 days, with no cart/checkout/wheel event in 7 days;
+  `--apply` SUPPRESSES them (reversible, `--undo <backup>`; never deletes). Dry run 2026-11-27: 252 active / 250, 21 to
+  suppress → 231. Also counts the Shopify subscribers whose Klaviyo profile is suppressed (41, 40 of them on 2026-11-13).
+- ⚠️ **Needs Mat's explicit OK:** setting `email_provider`, any `--apply`, any Resend/DNS/Vercel change.
+
+
 ## Panier abandonné — un seul canal, pas deux
 
 La récupération de panier abandonné passe **uniquement par le popup du thème** (2 écrans
@@ -880,6 +935,10 @@ ou de double sollicitation perçue comme du spam. Détail technique : `docs/KLAV
 - `ASSISTANT_CONTACT_WHATSAPP` — optional. Digits only (e.g. `15145550123`). **No WhatsApp
   link is shown until this is set** — there is no number anywhere in the repo to default to.
 - `CRON_SECRET` — Vercel Cron auth
+- `RESEND_API_KEY`, `EMAIL_FROM` (e.g. `Ameublo Direct <bonjour@ameublodirect.ca>`), `EMAIL_TOKEN_SECRET` (≥ 32 chars,
+  signs unsubscribe links; keep the old one in `EMAIL_TOKEN_SECRET_PREVIOUS` 60 days after a rotation),
+  `RESEND_WEBHOOK_SECRET`, optional `EMAIL_REPLY_TO` — the free email engine (docs/EMAIL-GRATUIT.md). Missing any of them
+  ⇒ `email_provider` behaves as `klaviyo`.
 - `AUTH_PASSWORD` — simple password auth for 2 users
 - `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)
 - `UMAMI_API_KEY` (optional) — Umami Cloud API key; adds visitors + add-to-cart clicks to the daily site-health funnel (`src/lib/site-health.ts`)

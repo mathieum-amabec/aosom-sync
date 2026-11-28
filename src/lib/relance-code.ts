@@ -291,3 +291,25 @@ export function buildRelance2TemplateHtml(locale: "fr" | "en"): string {
 <p style="font:12px/1.5 Arial,sans-serif;color:#888;max-width:560px">{{ organization.name }} · {{ organization.full_address }}<br>{% unsubscribe '${c.unsubscribe}' %}</p>
 </td></tr></table></body></html>`;
 }
+
+/**
+ * The same email for our own engine (settings email_provider = "resend"): body only — layout.ts adds the header,
+ * the CASL footer and the unsubscribe link. Same copy, code, expiry and items as the Klaviyo template above.
+ */
+export function relance2Email(e: CheckoutEvent, code: StoredCode, itemsHtml: string): { subject: string; preheader: string; bodyHtml: string; bodyText: string } | null {
+  if (!e.recoverUrl) return null;
+  const c = COPY2[e.locale];
+  const expiry = formatExpiry(code.endsAt, e.locale);
+  const bodyHtml = `<h1 style="margin:8px 0 14px;font:bold 22px/1.3 Arial,sans-serif;color:#222">${esc(c.title)}</h1>
+<p style="margin:0 0 14px">${esc(c.intro)}</p>
+<p style="margin:16px 0;text-align:center"><span style="display:inline-block;border:2px dashed #c8553d;border-radius:8px;padding:14px 22px;font:bold 22px/1 'Courier New',monospace;letter-spacing:2px;color:#222">${esc(code.code)}</span></p>
+<p style="margin:0 0 14px;font-size:14px;text-align:center">${esc(c.terms)} ${esc(expiry)} ${esc(c.tz)}.<br>${esc(c.once)}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%">${itemsHtml}</table>
+<p style="margin:12px 0 14px;font-size:14px">${esc(c.howto)}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px auto"><tr><td style="background:#c8553d;border-radius:6px"><a href="${esc(e.recoverUrl)}" style="display:inline-block;padding:14px 28px;color:#ffffff;text-decoration:none;font:bold 16px Arial,sans-serif">${esc(c.cta)}</a></td></tr></table>
+<p style="margin:0 0 14px;font-size:14px">${c.perks}</p>
+<p style="margin:0 0 14px;font-size:13px;color:#666">${esc(c.help)}</p>`;
+  const items = e.items.slice(0, 6).map((i) => `- ${i.title}`).join("\n");
+  const bodyText = `${c.title}\n\n${c.intro}\n\n${code.code}\n${c.terms} ${expiry} ${c.tz}.\n${c.once}\n\n${items}\n\n${c.howto}\n${c.cta} : ${e.recoverUrl}\n\n${c.help}`;
+  return { subject: c.subject, preheader: c.preview, bodyHtml, bodyText };
+}

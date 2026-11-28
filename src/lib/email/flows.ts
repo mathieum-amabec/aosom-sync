@@ -18,7 +18,8 @@ import {
   CHECKOUT_STARTED, PLACED_ORDER, STEPS as RELAY_STEPS, WHEEL_WON, emptyRelayState, selectDue,
   type RelayState, type RelayStep, type TriggerEvent,
 } from "../flow-relay";
-import { MODE_KEY, configProblems, loadEngineConfig, parseMode, type EngineMode, type OutgoingEmail, type SendOutcome } from "./engine";
+import { RETRY_LATER, configProblems, loadEngineConfig, type EngineConfig, type EngineMode, type OutgoingEmail, type Priority, type SendOutcome } from "./engine";
+import { emailKey } from "./unsubscribe";
 import { mayEmail, type KlaviyoConsent } from "./consent";
 import { avis, baissePrix, bienvenue1, bienvenue2, relance1, relance2, roue1, roue2, roue3, type EmailContent, type Props, eventLocale } from "./templates";
 
@@ -47,6 +48,9 @@ export interface EngineFlow {
   consent: ConsentBasis;
   render: (props: Props) => EmailContent | null;
 }
+
+/** Daily-cap priority of each group (engine.ts Priority): wheel codes first, then checkout reminders, reviews, marketing. */
+export const GROUP_PRIORITY: Record<FlowGroup, Priority> = { roue: 0, relance: 1, avis: 2, bienvenue: 3, "baisse-prix": 3 };
 
 /** Engine bookkeeping: the relay shape plus, per step, the events whose email really went out. */
 export interface EngineState extends RelayState {
@@ -159,15 +163,31 @@ export function relayKeysOwnedByEngine(mode: EngineMode, takeover: Takeover, con
 }
 
 /**
+ * Every relay key, for `email_provider` = "resend": the relays stand down entirely. The two relay steps the engine has
+ * no flow for (price-alert-confirm, morning-report) are sent directly by their own routes (dispatch.ts), so no Klaviyo
+ * event exists for them any more.
+ */
+export function allRelayKeys(): Set<string> {
+  return new Set([...RELAY_STEPS.map((s) => s.key), RELANCE_PAIEMENT_RELAY]);
+}
+
+/** The takeover the engine works with: all groups at once when the provider is "resend", else the ticked ones. */
+export function effectiveTakeover(cfg: Pick<EngineConfig, "provider" | "providerSince">, legacy: Takeover): Takeover {
+  if (cfg.provider !== "resend") return legacy;
+  const since = cfg.providerSince ?? new Date(0).toISOString();
+  return Object.fromEntries(GROUPS.map((g) => [g, since])) as Takeover;
+}
+
+/**
  * What the relays call at the start of each run. A settings read error THROWS (the relay run
  * aborts and retries in 15 min) rather than guessing "nothing owned" and resending.
  */
 export async function loadRelayKeysOwnedByEngine(getSetting: (k: string) => Promise<string | null>): Promise<Set<string>> {
-  const [mode, takeover] = await Promise.all([getSetting(MODE_KEY), getSetting(TAKEOVER_KEY)]);
-  const m = parseMode(mode);
-  if (m !== "live") return new Set();
-  const configOk = configProblems(await loadEngineConfig(getSetting)).length === 0;
-  return relayKeysOwnedByEngine(m, parseTakeover(takeover), configOk);
+  const [cfg, takeover] = await Promise.all([loadEngineConfig(getSetting), getSetting(TAKEOVER_KEY)]);
+  if (cfg.mode !== "live") return new Set();
+  const configOk = configProblems(cfg).length === 0;
+  if (cfg.provider === "resend") return configOk ? allRelayKeys() : new Set();
+  return relayKeysOwnedByEngine(cfg.mode, parseTakeover(takeover), configOk);
 }
 
 /** The engine's live bookkeeping, for the relays (null when none or unreadable: the relays then see only their own). */
@@ -227,6 +247,8 @@ export interface FlowRunDeps {
   consentOf: (profileId: string) => Promise<KlaviyoConsent>;
   /** Mode "test": only the test recipients. */
   recipientAllowed: (email: string) => boolean;
+  /** Abandoned checkout #2: true when relance-code's 15 $ email owns this checkout (never both). */
+  checkout2Yields?: (ev: TriggerEvent) => boolean;
   send: (msg: OutgoingEmail) => Promise<SendOutcome>;
   timeLeft: () => boolean;
 }
@@ -251,7 +273,8 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
   // first run: the overlap window only (older triggers were the relays' job), never the whole history
   let state = (await d.loadState()) ?? emptyEngineState(new Date(now.getTime() - TAKEOVER_OVERLAP_MIN * 60e3).toISOString());
   state = pruneEngineState(state, now);
-  const flows = FLOWS.filter((f) => groups.includes(f.group));
+  // most important first: when Resend's daily cap is near, the wheel codes and checkout reminders get the room
+  const flows = FLOWS.filter((f) => groups.includes(f.group)).sort((a, b) => GROUP_PRIORITY[a.group] - GROUP_PRIORITY[b.group]);
 
   const byMetric = new Map<string, TriggerEvent[]>();
   for (const m of new Set(flows.map((f) => f.step.metricId))) {
@@ -259,9 +282,17 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
     byMetric.set(m, await d.events(m, iso(lookback)));
   }
   const maxLookback = Math.max(...flows.map((f) => f.step.offsetMin + f.step.graceMin)) + 60;
+  // Keyed by Klaviyo profile AND by `email:<address>`: a wheel spin recorded in Turso (email_provider "resend") has no
+  // Klaviyo profile, and must still see the person's orders (and the welcome email must still see their wheel win).
+  const byEmail = (email: string | null) => (email ? `email:${emailKey(email)}` : null);
+  const pidEmail = new Map<string, string>();
+  for (const evs of byMetric.values()) for (const e of evs) if (e.email) pidEmail.set(e.profileId, e.email);
   const orderTimes = new Map<string, number[]>();
-  for (const o of await d.events(PLACED_ORDER, iso(maxLookback))) orderTimes.set(o.profileId, [...(orderTimes.get(o.profileId) ?? []), Date.parse(o.at)]);
+  for (const o of await d.events(PLACED_ORDER, iso(maxLookback))) {
+    for (const k of [o.profileId, byEmail(o.email)]) if (k) orderTimes.set(k, [...(orderTimes.get(k) ?? []), Date.parse(o.at)]);
+  }
   const wheel = flows.some((f) => f.step.noRecentWheelWin) ? await d.events(WHEEL_WON, iso(7 * 24 * 60)) : [];
+  const keysOf = (pid: string) => [pid, byEmail(pid.startsWith("email:") ? pid.slice(6) : pidEmail.get(pid) ?? null)].filter((k): k is string => !!k);
 
   // relance-2 needs reminder #1 sent: resolved up front (async) for selectDue (sync)
   const r1 = new Set<string>();
@@ -284,12 +315,18 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
       now,
       // the relays' cooldowns count too: someone they just mailed is not mailed again here
       state: { ...state, startAt: groupStart(d.mode, d.takeover, flow.group, state.startAt), prof: { ...state.prof, [k]: merge(d.relay.prof[flow.relayKey], state.prof[k]) } },
-      orderedAfter: (pid: string, at: string) => (orderTimes.get(pid) ?? []).some((t) => t >= Date.parse(at) - 5 * 60e3),
-      wonWheelWithin7d: (pid: string) => wheel.some((w) => w.profileId === pid && now.getTime() - Date.parse(w.at) < 7 * 24 * 3600e3),
+      orderedAfter: (pid: string, at: string) => keysOf(pid).some((k) => (orderTimes.get(k) ?? []).some((t) => t >= Date.parse(at) - 5 * 60e3)),
+      wonWheelWithin7d: (pid: string) => {
+        const keys = new Set(keysOf(pid));
+        return wheel.some((w) => (keys.has(w.profileId) || keys.has(byEmail(w.email) ?? "")) && now.getTime() - Date.parse(w.at) < 7 * 24 * 3600e3);
+      },
       relancePaiementSent: (id: string) => r1.has(id),
       flowSendingAgain: d.flowSendingAgain,
     };
-    const due = selectDue(flow.step, byMetric.get(flow.step.metricId) ?? [], ctx).filter((e) => !d.relay.done[flow.relayKey]?.[e.id]).slice(0, MAX_PER_FLOW);
+    const due = selectDue(flow.step, byMetric.get(flow.step.metricId) ?? [], ctx)
+      .filter((e) => !d.relay.done[flow.relayKey]?.[e.id])
+      .filter((e) => flow.relayKey !== "checkout-2" || !d.checkout2Yields?.(e))
+      .slice(0, MAX_PER_FLOW);
     if (res.due) { res.due[flow.key] = due.length; continue; }
 
     for (const ev of due) {
@@ -302,10 +339,11 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
       if (!mayEmail(c, flow.consent)) { mark(); bump(res.skipped, `${flow.key}:sans-consentement`); continue; }
       const content = flow.render(ev.props);
       if (!content) { mark(); bump(res.skipped, `${flow.key}:donnees-incompletes`); continue; }
-      const out = await d.send({ to: ev.email!, flow: flow.key, idemKey: idemKey(flow, ev), kind: "marketing", locale: eventLocale(ev.props), ...content });
+      const out = await d.send({ to: ev.email!, flow: flow.key, idemKey: idemKey(flow, ev), kind: "marketing", priority: GROUP_PRIORITY[flow.group], locale: eventLocale(ev.props), ...content });
       if (out.status === "failed" && out.retryable) { res.failed.push({ flow: flow.key, error: out.error }); continue; } // retried next run
-      // engine switched off or misconfigured mid-run: not this person's fault, try again next run
-      if (out.status === "skipped" && (out.reason === "off" || out.reason === "not-configured")) { bump(res.skipped, `${flow.key}:${out.reason}`); continue; }
+      // engine switched off or misconfigured mid-run, or Resend's daily cap reached: not this person's fault, try
+      // again next run (the step's grace window bounds how long it waits)
+      if (out.status === "skipped" && RETRY_LATER.has(out.reason)) { bump(res.skipped, `${flow.key}:${out.reason}`); continue; }
       mark();
       if (out.status === "sent") {
         bump(res.sent, flow.key);

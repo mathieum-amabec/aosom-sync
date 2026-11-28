@@ -15,7 +15,8 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { getProduct, upsertWaitlistEntry } from "@/lib/database";
-import { identifyProfile, trackEvent } from "@/lib/klaviyo-client";
+import { identifyProfile } from "@/lib/klaviyo-client";
+import { currentRoute, dispatchEvent } from "@/lib/email/dispatch";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { storeLink } from "@/lib/insights";
 import { getPublicAppUrl } from "@/lib/config";
@@ -109,13 +110,14 @@ export async function POST(request: Request) {
   const confirmUrl = `${base}/api/waitlist/confirm?token=${encodeURIComponent(confirmToken)}`;
   const productUrl = storeLink(shopifyProductId, (product.shopify_handle as string) || null).shopifyUrl;
   try {
-    await identifyProfile(email, { last_back_in_stock_sku: sku });
-    const tracked = await trackEvent("Back In Stock Confirmation", email, {
+    // email_provider = "resend": no Klaviyo profile at all, the confirmation goes out through Resend
+    if ((await currentRoute()) !== "resend") await identifyProfile(email, { last_back_in_stock_sku: sku });
+    const tracked = await dispatchEvent("Back In Stock Confirmation", email, {
       confirm_url: confirmUrl,
       sku,
       product_name: (product.name as string) || sku,
       product_url: productUrl,
-    });
+    }, { idemKey: `alerte-stock-confirmation:${confirmToken}`, maxDelayH: 20 });
     if (!tracked.ok) {
       console.warn(`[waitlist] confirmation email not sent for ${email}: ${tracked.skipped ? "Klaviyo not configured" : tracked.error}`);
     }

@@ -19,6 +19,10 @@ const SECRET = "s".repeat(40);
 
 const cfg = (over: Partial<EngineConfig> = {}): EngineConfig => ({
   mode: "live",
+  provider: "klaviyo",
+  providerSince: null,
+  dailyCap: 95,
+  monthlyCap: 2900,
   testRecipients: new Set(),
   mailingAddress: "C.P. 123, Saint-Hubert QC J3Y 0A1",
   from: "Ameublo Direct <bonjour@ameublodirect.ca>",

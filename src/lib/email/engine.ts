@@ -21,8 +21,48 @@ import { emailKey, tokenSecret, unsubscribeUrl } from "./unsubscribe";
 export const MODE_KEY = "email_engine_mode";
 export const TEST_RECIPIENTS_KEY = "email_test_recipients";
 export const ADDRESS_KEY = "email_mailing_address";
+/**
+ * THE switch (free email, 2026-11-27): who sends every automatic email.
+ *   "klaviyo" (default) = today's behaviour, untouched (the legacy `email_engine_mode` / takeover still apply);
+ *   "test"    = Klaviyo keeps mailing customers; Resend mails ONLY `email_test_recipients` (all flows);
+ *   "resend"  = every automatic email goes through Resend and the Klaviyo relays stand down.
+ * A non-klaviyo value with a configuration problem behaves as "klaviyo" (fail safe: customers keep getting mail).
+ */
+export const PROVIDER_KEY = "email_provider";
+/** ISO time the provider last became "resend" (hand-over start; set by /api/email/status). */
+export const PROVIDER_SINCE_KEY = "email_provider_since";
+/** Resend free plan: 100 emails/day, 3,000/month. Overridable (e.g. after an upgrade) without a deploy. */
+export const DAILY_CAP_KEY = "email_daily_cap";
+export const MONTHLY_CAP_KEY = "email_monthly_cap";
+export const DEFAULT_DAILY_CAP = 95; // a little under Resend's 100, for the odd concurrent send
+export const DEFAULT_MONTHLY_CAP = 2900;
 
 export type EngineMode = "off" | "test" | "live";
+export type EmailProvider = "klaviyo" | "test" | "resend";
+
+/**
+ * Priority under the daily cap (lower = more important). A lower tier may only use a share of the cap, so the
+ * important emails always find room: 0 transactional + wheel codes (100 %), 1 cart / checkout reminders (90 %),
+ * 2 review requests (75 %), 3 other marketing — welcome, price drop, back in stock, referral launch (60 %).
+ */
+export type Priority = 0 | 1 | 2 | 3;
+export const TIER_SHARE: Record<Priority, number> = { 0: 1, 1: 0.9, 2: 0.75, 3: 0.6 };
+
+export function parseProvider(v: string | null): EmailProvider {
+  return v === "test" || v === "resend" ? v : "klaviyo";
+}
+
+/** The engine mode the provider implies ("klaviyo" leaves the legacy mode as it is). */
+export function modeForProvider(provider: EmailProvider, legacy: EngineMode): EngineMode {
+  return provider === "resend" ? "live" : provider === "test" ? "test" : legacy;
+}
+
+/** Room left for this priority, given what was sent in the last 24 h / 30 days. */
+export function capAllows(p: Priority, sentDay: number, sentMonth: number, caps: { daily: number; monthly: number }): "ok" | "daily-cap" | "monthly-cap" {
+  if (sentMonth >= Math.floor(caps.monthly * TIER_SHARE[p])) return "monthly-cap";
+  if (sentDay >= Math.floor(caps.daily * TIER_SHARE[p])) return "daily-cap";
+  return "ok";
+}
 
 export interface OutgoingEmail {
   to: string;
@@ -37,10 +77,17 @@ export interface OutgoingEmail {
   preheader: string;
   bodyHtml: string;
   bodyText: string;
+  /** Daily-cap priority (see Priority). Default: 0 for transactional, 3 for marketing. */
+  priority?: Priority;
 }
 
 export interface EngineConfig {
+  /** Effective mode (from `email_provider`, else the legacy `email_engine_mode`). */
   mode: EngineMode;
+  provider: EmailProvider;
+  providerSince: string | null;
+  dailyCap: number;
+  monthlyCap: number;
   testRecipients: Set<string>;
   mailingAddress: string;
   from: string;
@@ -50,7 +97,10 @@ export interface EngineConfig {
   baseUrl: string;
 }
 
-export type SkipReason = "off" | "not-test-recipient" | "invalid-email" | "suppressed" | "duplicate" | "not-configured";
+export type SkipReason = "off" | "not-test-recipient" | "invalid-email" | "suppressed" | "duplicate" | "not-configured" | "daily-cap" | "monthly-cap";
+
+/** Skips that are not final: the same email may go out on a later run (switch, configuration, cap). */
+export const RETRY_LATER: ReadonlySet<SkipReason> = new Set(["off", "not-configured", "daily-cap", "monthly-cap"]);
 export type SendOutcome =
   | { status: "sent"; id: string }
   | { status: "skipped"; reason: SkipReason; detail?: string }
@@ -68,9 +118,18 @@ export async function loadEngineConfig(
   getSetting: (k: string) => Promise<string | null>,
   env: Record<string, string | undefined> = process.env,
 ): Promise<EngineConfig> {
-  const [mode, test, address] = await Promise.all([getSetting(MODE_KEY), getSetting(TEST_RECIPIENTS_KEY), getSetting(ADDRESS_KEY)]);
+  const [mode, test, address, provider, since, daily, monthly] = await Promise.all([
+    getSetting(MODE_KEY), getSetting(TEST_RECIPIENTS_KEY), getSetting(ADDRESS_KEY),
+    getSetting(PROVIDER_KEY), getSetting(PROVIDER_SINCE_KEY), getSetting(DAILY_CAP_KEY), getSetting(MONTHLY_CAP_KEY),
+  ]);
+  const p = parseProvider(provider);
+  const cap = (v: string | null, d: number) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : d; };
   return {
-    mode: parseMode(mode),
+    mode: modeForProvider(p, parseMode(mode)),
+    provider: p,
+    providerSince: since && !Number.isNaN(Date.parse(since)) ? since : null,
+    dailyCap: cap(daily, DEFAULT_DAILY_CAP),
+    monthlyCap: cap(monthly, DEFAULT_MONTHLY_CAP),
     testRecipients: parseRecipients(test),
     mailingAddress: (address ?? "").trim(),
     from: (env.EMAIL_FROM ?? "").trim(),
@@ -97,7 +156,12 @@ export interface EngineDeps {
   reserve: (s: { idemKey: string; email: string; flow: string; kind: string }) => Promise<number | null>;
   finish: (id: number, r: { status: "sent" | "failed" | "skipped"; resendId?: string | null; error?: string | null }) => Promise<void>;
   send: (e: ResendEmail, idemKey: string) => Promise<ResendResult>;
+  /** Emails already counted against Resend's caps since this unix second. Absent = no cap check (tests). */
+  countSentSince?: (sinceSec: number) => Promise<number>;
+  now?: () => Date;
 }
+
+export const priorityOf = (msg: Pick<OutgoingEmail, "priority" | "kind">): Priority => msg.priority ?? (msg.kind === "transactional" ? 0 : 3);
 
 /** The exact email that would go out (also used for previews). */
 export function buildEmail(msg: OutgoingEmail, c: Pick<EngineConfig, "from" | "replyTo" | "mailingAddress" | "tokenSecret" | "baseUrl">): ResendEmail {
@@ -123,6 +187,12 @@ export async function sendEmail(msg: OutgoingEmail, c: EngineConfig, deps: Engin
   const problems = configProblems(c);
   if (problems.length) return { status: "skipped", reason: "not-configured", detail: problems.join(" · ") };
   if (msg.kind === "marketing" && (await deps.isSuppressed(to))) return { status: "skipped", reason: "suppressed" };
+  if (deps.countSentSince) {
+    const nowSec = Math.floor((deps.now?.() ?? new Date()).getTime() / 1000);
+    const [day, month] = await Promise.all([deps.countSentSince(nowSec - 86_400), deps.countSentSince(nowSec - 30 * 86_400)]);
+    const room = capAllows(priorityOf(msg), day, month, { daily: c.dailyCap, monthly: c.monthlyCap });
+    if (room !== "ok") return { status: "skipped", reason: room, detail: `${day} envoyés en 24 h, ${month} en 30 jours` };
+  }
 
   const id = await deps.reserve({ idemKey: msg.idemKey, email: to, flow: msg.flow, kind: msg.kind });
   if (id == null) return { status: "skipped", reason: "duplicate" };
@@ -148,5 +218,6 @@ export async function defaultEngineDeps(apiKey: string): Promise<EngineDeps> {
     reserve: db.reserveEmailSend,
     finish: db.finishEmailSend,
     send: (e, key) => sendViaResend(e, key, { apiKey }),
+    countSentSince: db.countEmailSendsSince,
   };
 }

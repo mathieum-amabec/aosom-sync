@@ -10,8 +10,10 @@ import {
 } from "@/lib/relance-paiement";
 import {
   RELANCE2_ENABLED_KEY, RELANCE2_MAX_AGE_H, RELANCE2_TEMPLATES_KEY, buildRelance2TemplateHtml, createRelance2Discount,
-  ensureRelance2Codes, relance2Enabled, relance2ProfileProps, relance2Subject, selectRelance2, type StoredCode,
+  ensureRelance2Codes, relance2Email, relance2Enabled, relance2ProfileProps, relance2Subject, selectRelance2, type StoredCode,
 } from "@/lib/relance-code";
+import { RETRY_LATER, defaultEngineDeps, loadEngineConfig, sendEmail } from "@/lib/email/engine";
+import { routeFor } from "@/lib/email/dispatch";
 import { emptyRelayState, type RelayState } from "@/lib/flow-relay";
 import {
   RELAY_LEASE_KEY, RELAY_LEASE_TTL_S, campaignStatus, cleanupLists, createList, flowsSendingAgain, kv, sendCampaign,
@@ -67,12 +69,16 @@ const countReasons = (skipped: Array<{ reason: string }>) => skipped.reduce<Reco
 
 async function run(dryRun: boolean) {
   const now = new Date();
-  // Our own email engine (src/lib/email/flows.ts) took this reminder over: it sends it now.
-  if ((await loadRelayKeysOwnedByEngine(getSetting)).has(RELANCE_PAIEMENT_RELAY)) {
+  // email_provider = "resend": reminder #1 is the engine's (email-flows cron), and reminder #2 with its 15 $ code is
+  // still decided here (Shopify code, same state) but goes out through Resend instead of a Klaviyo campaign.
+  const cfg = await loadEngineConfig(getSetting);
+  const viaResend = routeFor(cfg) === "resend";
+  // Our own email engine (src/lib/email/flows.ts) took this reminder over (legacy hand-over): it sends it now.
+  if (!viaResend && (await loadRelayKeysOwnedByEngine(getSetting)).has(RELANCE_PAIEMENT_RELAY)) {
     return NextResponse.json({ success: true, skipped: "taken-over-by-email-engine" });
   }
   // If Klaviyo's own Abandoned Checkout flow delivers again, stop: the customer would get both.
-  const sendingAgain = await flowsSendingAgain(now);
+  const sendingAgain = viaResend ? new Set<string>() : await flowsSendingAgain(now);
   if (sendingAgain.has(ABANDONED_CHECKOUT_FLOW) || sendingAgain.has("*")) {
     return NextResponse.json({ success: true, skipped: "klaviyo-flow-sending-again" });
   }
@@ -114,7 +120,9 @@ async function run(dryRun: boolean) {
   }
   // an order up to 5 min before the checkout event still counts (Shopify timestamps differ slightly)
   const orderedAfter = (pid: string, iso: string) => (orderTimes.get(pid) ?? []).some((t) => Date.parse(t) >= Date.parse(iso) - 5 * 60e3);
-  const { send, skipped } = selectCandidates(events, state, orderedAfter, now);
+  const picked = selectCandidates(events, state, orderedAfter, now);
+  // via Resend, reminder #1 belongs to the engine: nothing decided (nor marked) here for it
+  const { send, skipped } = viaResend ? { send: [] as CheckoutEvent[], skipped: [] as typeof picked.skipped } : picked;
 
   // Reminder #2 with code: never for a checkout whose generic reminder #2 (flow-relay "checkout-2") went out.
   let relay: RelayState = emptyRelayState();
@@ -180,9 +188,13 @@ async function run(dryRun: boolean) {
     }
     if (codes.errors.length) await setSetting(STATE_KEY, JSON.stringify(state));
     const codeOf = new Map<string, StoredCode>(codes.ready.map((r) => [r.event.eventId, r.code]));
+    if (viaResend) {
+      results.push(...(await sendRelance2ViaResend(codes.ready, cfg, state, now)));
+      await setSetting(STATE_KEY, JSON.stringify(state));
+    }
     let templates: Record<string, string> = {};
     try { templates = JSON.parse((await getSetting(RELANCE2_TEMPLATES_KEY)) ?? "{}"); } catch { /* recreate */ }
-    for (const locale of ["fr", "en"] as const) {
+    for (const locale of viaResend ? [] : (["fr", "en"] as const)) {
       const batch = codes.ready.map((r) => r.event).filter((e) => e.locale === locale);
       if (!batch.length) continue;
       try {
@@ -220,9 +232,42 @@ async function run(dryRun: boolean) {
       results.push({ kind: b.kind, locale: b.locale, sent: 0, error: err instanceof Error ? err.message : String(err) });
     }
   }
-  const cleaned = await cleanupLists(72, now).catch(() => 0);
+  const cleaned = viaResend ? 0 : await cleanupLists(72, now).catch(() => 0);
   const sent = results.filter((r) => r.kind === "r1").reduce((n, r) => n + r.sent, 0);
   const sent2 = results.filter((r) => r.kind === "r2").reduce((n, r) => n + r.sent, 0);
-  return NextResponse.json({ success: results.every((r) => !r.error), checkouts: events.length, candidates: send.length, sent,
+  return NextResponse.json({ success: results.every((r) => !r.error), via: viaResend ? "resend" : "klaviyo", checkouts: events.length, candidates: send.length, sent,
     relance2: { enabled: r2On, candidates: r2On ? r2.send.length : 0, sent: sent2 }, results, cleanedLists: cleaned });
+}
+
+/**
+ * Reminder #2 with code through Resend, one email per checkout (idem key = checkout event id: never twice). Marks
+ * the state like a Klaviyo send would; a cap or a Resend hiccup leaves the checkout for the next run (inside its
+ * 20–40 h window), a final skip (unsubscribed…) settles it so the generic reminder #2 does not take over either.
+ */
+async function sendRelance2ViaResend(
+  ready: Array<{ event: CheckoutEvent; code: StoredCode }>,
+  cfg: Awaited<ReturnType<typeof loadEngineConfig>>,
+  state: RelanceState,
+  now: Date,
+): Promise<Array<{ kind: "r2"; locale: string; sent: number; error?: string }>> {
+  const deps = await defaultEngineDeps(cfg.apiKey);
+  const out: Array<{ kind: "r2"; locale: string; sent: number; error?: string }> = [];
+  for (const { event: e, code } of ready) {
+    const content = relance2Email(e, code, renderItemsHtml(e));
+    const at = now.toISOString();
+    if (!content || !e.email) { state.events2[e.eventId] = at; continue; }
+    const r = await sendEmail({ to: e.email, flow: "relance-2-code", idemKey: `relance-2-code:${e.eventId}`, kind: "marketing", priority: 1, locale: e.locale, ...content }, cfg, deps);
+    if (r.status === "sent" || (r.status === "skipped" && r.reason === "duplicate")) {
+      state.events2[e.eventId] = at; state.sent2[e.eventId] = at; state.profiles2[e.profileId] = at;
+      out.push({ kind: "r2", locale: e.locale, sent: 1 });
+    } else if (r.status === "skipped" && !RETRY_LATER.has(r.reason)) {
+      state.events2[e.eventId] = at;
+    } else if (r.status === "failed" && !r.retryable) {
+      state.events2[e.eventId] = at;
+      out.push({ kind: "r2", locale: e.locale, sent: 0, error: r.error });
+    } else {
+      out.push({ kind: "r2", locale: e.locale, sent: 0, error: r.status === "failed" ? r.error : r.reason });
+    }
+  }
+  return out;
 }

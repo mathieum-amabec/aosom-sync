@@ -257,6 +257,23 @@ export function buildTemplateHtml(locale: "fr" | "en"): string {
 </td></tr></table></body></html>`;
 }
 
+/**
+ * The same email for our own engine (settings email_provider = "resend"): body only — layout.ts adds the header,
+ * the CASL footer and the unsubscribe link.
+ */
+export function cartEmail(c: Cart, now: Date = new Date()): { subject: string; preheader: string; bodyHtml: string; bodyText: string } {
+  const k = COPY[c.locale];
+  const { subject, preview } = cartSubject(c.locale, now);
+  const bodyHtml = `<h1 style="margin:8px 0 14px;font:bold 22px/1.3 Arial,sans-serif;color:#222">${esc(k.title)}</h1>
+<p style="margin:0 0 14px">${esc(k.intro)}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%">${renderItemsHtml(c)}</table>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px auto"><tr><td style="background:#c8553d;border-radius:6px"><a href="${esc(c.url)}" style="display:inline-block;padding:14px 28px;color:#ffffff;text-decoration:none;font:bold 16px Arial,sans-serif">${esc(k.cta)}</a></td></tr></table>
+<p style="margin:0 0 14px;font-size:14px">${k.perks}</p>
+<p style="margin:0 0 14px;font-size:13px;color:#666">${esc(k.help)}</p>`;
+  const items = c.items.slice(0, 6).map((i) => `- ${i.title}`).join("\n");
+  return { subject, preheader: preview, bodyHtml, bodyText: `${k.title}\n\n${k.intro}\n${items}\n\n${k.cta} : ${c.url}\n\n${k.perks.replace(/<[^>]+>/g, "")}\n\n${k.help}` };
+}
+
 // ─── Klaviyo IO ─────────────────────────────────────────────────────────
 
 /** Subscription status + locale of the given profiles (100 per call). Missing profile → absent. */

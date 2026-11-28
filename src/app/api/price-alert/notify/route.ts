@@ -9,7 +9,7 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { getTriggeredPriceAlerts, markPriceAlertsNotified } from "@/lib/database";
-import { trackEvent } from "@/lib/klaviyo-client";
+import { dispatchEvent } from "@/lib/email/dispatch";
 
 export const maxDuration = 60;
 
@@ -28,13 +28,14 @@ export async function GET(request: Request) {
     const productUrl = alert.shopifyHandle
       ? `${STOREFRONT_BASE}/products/${alert.shopifyHandle}`
       : STOREFRONT_BASE;
-    const res = await trackEvent("Price Drop Alert", alert.email, {
+    // Klaviyo event, or the email itself through Resend (settings email_provider, src/lib/email/dispatch.ts)
+    const res = await dispatchEvent("Price Drop Alert", alert.email, {
       sku: alert.sku,
       product_name: alert.productName,
       old_price: alert.priceAtSignup,
       new_price: alert.currentPrice,
       product_url: productUrl,
-    });
+    }, { idemKey: `baisse-prix-alerte:${alert.id}:${alert.currentPrice}` });
     // Only mark notified when the event was actually accepted by Klaviyo. If the
     // key is unset (skipped) or the call errored, leave the alert pending so the
     // next run retries — we never want to silently swallow an un-sent alert.

@@ -5,13 +5,15 @@ import { acquireLease, getSetting, releaseLease, setSetting } from "@/lib/databa
 import { CHECKOUT_STARTED_METRIC, PLACED_ORDER_METRIC, STATE_KEY as RELANCE_STATE_KEY, metricId, recentEvents } from "@/lib/relance-paiement";
 import {
   ADDED_TO_CART_METRIC, CART_MAX_AGE_H, ENABLED_KEY, MAX_PER_DAY, MAX_PER_RUN, STATE_KEY, TEMPLATES_KEY,
-  buildTemplateHtml, cartSubject, emptyState, fetchProfileInfo, parseCartEvent, pruneState, renderItemsHtml, selectCarts,
+  buildTemplateHtml, cartEmail, cartSubject, emptyState, fetchProfileInfo, parseCartEvent, pruneState, renderItemsHtml, selectCarts,
   type Cart, type CartEvent, type CartRelayState, type SelectCtx,
 } from "@/lib/cart-relay";
 import {
   RELAY_LEASE_KEY, RELAY_LEASE_TTL_S, assertRenders, campaignStatus, cleanupLists, createList, kv, sendCampaign,
   shouldRetry, stillInFlight, waitForLists,
 } from "@/lib/klaviyo-campaigns";
+import { RETRY_LATER, defaultEngineDeps, loadEngineConfig, sendEmail } from "@/lib/email/engine";
+import { routeFor } from "@/lib/email/dispatch";
 
 /**
  * GET /api/cron/cart-relay — every 30 min. Emails identified shoppers who ADDED TO CART and neither
@@ -108,6 +110,28 @@ async function run(dryRun: boolean) {
   await setSetting(STATE_KEY, JSON.stringify(state));
 
   const results: Array<{ locale: string; sent: number; campaignId?: string; error?: string }> = [];
+  // email_provider = "resend": one email per cart through our engine, same selection, caps and bookkeeping
+  const cfg = await loadEngineConfig(getSetting);
+  if (send.length && routeFor(cfg) === "resend") {
+    const deps = await defaultEngineDeps(cfg.apiKey);
+    for (const c of send) {
+      if (!c.email) continue;
+      const r = await sendEmail({ to: c.email, flow: "panier", idemKey: `panier:${c.profileId}:${c.at}`, kind: "marketing", priority: 1, locale: c.locale, ...cartEmail(c, now) }, cfg, deps);
+      const at = now.toISOString();
+      if (r.status === "sent" || (r.status === "skipped" && r.reason === "duplicate")) {
+        for (const id of c.eventIds) state.events[id] = at;
+        state.profiles[c.profileId] = at;
+        state.sentLog = [...state.sentLog, at];
+        results.push({ locale: c.locale, sent: 1 });
+      } else if (r.status === "skipped" && !RETRY_LATER.has(r.reason)) {
+        for (const id of c.eventIds) state.events[id] = at; // unsubscribed, invalid…: settled
+      } else {
+        results.push({ locale: c.locale, sent: 0, error: r.status === "failed" ? r.error : r.reason });
+      }
+      await setSetting(STATE_KEY, JSON.stringify(state));
+    }
+    return NextResponse.json({ success: results.every((r) => !r.error), via: "resend", cartEvents: events.length, candidates: send.length, sent: results.reduce((n, r) => n + r.sent, 0), results });
+  }
   if (send.length) {
     let templates: Record<string, string> = {};
     try { templates = JSON.parse((await getSetting(TEMPLATES_KEY)) ?? "{}"); } catch { /* recreate */ }

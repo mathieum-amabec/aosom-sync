@@ -17,7 +17,11 @@ import {
   reserveWheelSpin,
   setWheelSpinCode,
   releaseWheelSpin,
+  recordEmailConsent,
+  setWheelSpinEmailVia,
 } from "@/lib/database";
+import { currentRoute } from "@/lib/email/dispatch";
+import { wheelEventProps } from "@/lib/email/wheel-source";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { clientIp } from "@/lib/client-ip";
 import {
@@ -153,23 +157,24 @@ export async function POST(request: Request) {
     console.error(`[roue] could not store code ${created.code} (${created.discountId}) for ${emailKey}: ${err}`);
   }
 
+  // Who sends the 3 code emails. settings email_provider = "resend": our engine reads this spin from Turso, and
+  // NOTHING goes to Klaviyo (no profile: the free plan is capped at 250). Otherwise the Klaviyo event, as before.
+  const via = (await currentRoute().catch(() => "klaviyo")) === "resend" ? "resend" : "klaviyo";
+  try {
+    await setWheelSpinEmailVia(emailKey, consent, via);
+    // the ticked box is ALSO kept in our own table, whatever the provider: no consent ever lives only in Klaviyo
+    if (consent) await recordEmailConsent({ email, source: "roue", locale });
+  } catch (err) {
+    console.warn(`[roue] could not record consent/email_via for ${emailKey}: ${err}`);
+  }
+
   // Best effort: the visitor already sees the code on screen, so a Klaviyo hiccup must not fail the spin.
   // No consent → nothing goes to Klaviyo: the event drives the 3 reminder emails, which need consent.
-  if (consent) try {
+  if (consent && via === "klaviyo") try {
     const listId = await getSetting("roue_klaviyo_list_id");
     const sub = await subscribeWheelProfile(email, listId);
     if (!sub.ok) console.warn(`[roue] Klaviyo subscribe failed: ${sub.status} ${sub.error}`);
-    const ev = await trackWheelWin(email, {
-      code: created.code,
-      prize_fr: prize.labelFr,
-      prize_en: prize.labelEn,
-      amount: prize.amount,
-      min_subtotal: prize.minSubtotal,
-      expires_at: created.endsAt,
-      locale,
-      apply_url_fr: `https://ameublodirect.ca/discount/${created.code}?redirect=/collections/all`,
-      apply_url_en: `https://ameublodirect.ca/discount/${created.code}?redirect=/en/collections/all`,
-    });
+    const ev = await trackWheelWin(email, wheelEventProps(created.code, prize, created.endsAt, locale));
     if (!ev.ok) console.warn(`[roue] Klaviyo event failed: ${ev.status} ${ev.error}`);
   } catch (err) {
     console.warn(`[roue] Klaviyo failed: ${err}`);

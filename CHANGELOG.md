@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.73] - 2026-11-27
+
+### Added
+
+- **Free email: one switch `settings.email_provider` (default `klaviyo` = nothing changes).** Mat chose the free route over a paid Klaviyo plan (free Klaviyo blocks every send above 250 active profiles; 252 on 2026-11-27). `resend` sends EVERY automatic email through the Resend engine of #648: the flows (wheel 1-3, welcome, checkout reminders, price drop) via `/api/cron/email-flows` with every group taken over at once; the 15 $ checkout reminder #2 and the cart reminder via Resend from their own crons; the morning report, publication alert, price-alert / back-in-stock confirmations and alerts and the referral credit via the new `dispatchEvent()` (same call as `trackEvent`, templates in `src/lib/email/direct.ts`). flow-relay stands down entirely. `test` keeps Klaviyo for customers and mails the Resend version to the test addresses only. A non-klaviyo provider with any configuration problem behaves as `klaviyo`. Dashboard: « Qui envoie tous les courriels » buttons + 24 h / 30 d quota line.
+- **Resend free-plan cap with priorities and a queue.** `sendEmail` checks the cap before claiming an email (`email_daily_cap` 95, `email_monthly_cap` 2900): tier 0 transactional + wheel codes + referral credit may use 100 %, 1 cart/checkout 90 %, 2 reviews 75 %, 3 other marketing 60 %. Flow emails over the cap are retried next run; direct emails wait in the new `email_outbox` table, drained by email-flows highest priority first, with an expiry. Same idem key in `email_sends`, the queue and Resend: never twice.
+- **New profiles stay out of Klaviyo with `resend`.** `/api/roue` always records the ticked box in the new `email_consents` table and `wheel_spins.consent/email_via`; with `resend` it writes nothing to Klaviyo and the engine reads the spin from Turso (orders matched by email). Price-alert / waitlist skip `identifyProfile`. Unsubscribes also update `email_consents` and, once the provider left `klaviyo`, the Shopify customer's email consent (`email_suppressions.in_shopify`), so Shopify Email campaigns skip them. Pushing the wheel's consent to Shopify is opt-in (`email_consent_to_shopify` = "1").
+- **Referral without Klaviyo.** `scripts/referral-launch.mts --via resend --per-day N` queues courriel 1 (unique codes per customer) one slice per day under the cap (refused unless the provider is `resend`); the credits cron's courriel 2 goes through `dispatchEvent` with one idem key per credit code. `--via klaviyo` (default) unchanged.
+- **`scripts/klaviyo-headroom.mts`** — dry run by default: active Klaviyo profiles that are neither buyers nor subscribers (Klaviyo or Shopify), older than 14 days, with no cart/checkout/wheel event in 7 days; `--apply` SUPPRESSES them (reversible, `--undo <backup>`, never deletes). Also counts the Shopify subscribers suppressed in Klaviyo. Dry run 2026-11-27: 252 active, 21 to suppress → 231; 41 Shopify subscribers suppressed (40 on 2026-11-13).
+- **`docs/EMAIL-GRATUIT.md`** — Mat's guide in plain French: Resend account, the exact DNS records for ameublodirect.ca (DNS at Shopify Domains: Tucows + Google Cloud name servers), Vercel variables, switch order (dry → test → resend), a Boxing Day campaign in Shopify Email with an authenticated sending domain, rollback.
+
+### Changed
+
+- CLAUDE.md: the wheel is rendered again on the live theme since 2026-11-27 (phone/tablet: opens by itself only on the home page; phone: tab hidden on collection pages too); every Meta ad paused since 2026-11-27.
+
 ## [0.5.107.72] - 2026-11-27
 
 ### Added

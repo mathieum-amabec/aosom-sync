@@ -10,7 +10,8 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { getProduct, upsertPriceAlert } from "@/lib/database";
-import { identifyProfile, trackEvent } from "@/lib/klaviyo-client";
+import { identifyProfile } from "@/lib/klaviyo-client";
+import { currentRoute, dispatchEvent } from "@/lib/email/dispatch";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { getPublicAppUrl } from "@/lib/config";
 
@@ -110,13 +111,14 @@ export async function POST(request: Request) {
   const base = getPublicAppUrl() || PUBLIC_BASE_FALLBACK;
   const confirmUrl = `${base}/api/price-alert/confirm?token=${encodeURIComponent(confirmToken)}`;
   try {
-    await identifyProfile(email, { last_price_alert_sku: sku });
-    const sent = await trackEvent("Price Alert Confirmation", email, {
+    // email_provider = "resend": no Klaviyo profile at all, the confirmation goes out through Resend
+    if ((await currentRoute()) !== "resend") await identifyProfile(email, { last_price_alert_sku: sku });
+    const sent = await dispatchEvent("Price Alert Confirmation", email, {
       confirm_url: confirmUrl,
       sku,
       product_name: (product.name as string) || sku,
       price: baselinePrice,
-    });
+    }, { idemKey: `alerte-prix-confirmation:${confirmToken}`, maxDelayH: 20 });
     if (!sent.ok) {
       console.warn(`[price-alert] confirmation email not sent for ${email}: ${sent.skipped ? "Klaviyo not configured" : sent.error}`);
     }
