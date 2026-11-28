@@ -3927,6 +3927,14 @@ export async function countEmailSendsSince(sinceSec: number): Promise<number> {
   return Number(rowToObj(r.rows[0]).n ?? 0);
 }
 
+/** Unix second of the last email that went out to this address (normalised key, any flow), or null. */
+export async function lastEmailSentTo(emailKey: string): Promise<number | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT MAX(created_at) AS t FROM email_sends WHERE email = ? AND status NOT IN ('failed', 'skipped')`, args: [emailKey] });
+  const t = Number(rowToObj(r.rows[0]).t);
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
 // ─── Email outbox (Resend daily cap) ───────────────────────────────
 
 export interface OutboxRow { id: number; idemKey: string; priority: number; notBefore: number; expiresAt: number; payload: string; attempts: number }

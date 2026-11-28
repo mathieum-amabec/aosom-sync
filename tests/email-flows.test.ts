@@ -231,3 +231,50 @@ describe("runEmailFlows", () => {
     expect(idemKey(FLOWS[0], wheelEv("z", 1))).toBe("relance-1:z");
   });
 });
+
+describe("follow-up spacing (two chains crossing)", () => {
+  const NOW = new Date("2026-11-02T12:00:00.000Z");
+  const ago = (min: number) => new Date(NOW.getTime() - min * 60e3).toISOString();
+  const ev = (id: string, min: number): TriggerEvent => ({ id, profileId: `p-${id}`, email: `${id}@client.ca`, at: ago(min), props: sampleProps("roue-1", "fr") });
+
+  function run(lastEmailAt: FlowRunDeps["lastEmailAt"], events: Record<string, TriggerEvent[]>) {
+    let saved: EngineState | null = null;
+    const sent: OutgoingEmail[] = [];
+    const d: FlowRunDeps = {
+      now: NOW, mode: "live", takeover: { roue: ago(5 * 24 * 60) },
+      loadState: async () => saved, saveState: async (s) => { saved = JSON.parse(JSON.stringify(s)); },
+      events: async (m) => events[m] ?? [], relay: relayView(null, null), relance1Sent: async () => false,
+      flowSendingAgain: () => false, consentOf: async () => ({ consent: "SUBSCRIBED", suppressed: false }), recipientAllowed: () => true,
+      send: vi.fn(async (m: OutgoingEmail) => { sent.push(m); return { status: "sent" as const, id: `re_${sent.length}` }; }),
+      lastEmailAt, timeLeft: () => true,
+    };
+    return { d, sent, state: () => saved };
+  }
+
+  it("holds a wheel reminder back while the person got another email under 4 h ago, then sends it", async () => {
+    // roue-2 is due 24 h 10 after the spin (3 h grace)
+    const events = { V5gzPH: [ev("a", 24 * 60 + 20)] };
+    const recent = run(async () => NOW.getTime() - 60 * 60e3, events);
+    const r = await runEmailFlows(recent.d);
+    expect(r.skipped).toEqual({ "roue-2:espacement": 1 });
+    expect(recent.sent).toHaveLength(0);
+    expect(recent.state()?.done["roue-2"]?.["a"]).toBeUndefined(); // not marked: retried next run
+    const later = run(async () => NOW.getTime() - 5 * 3600e3, events);
+    await runEmailFlows(later.d);
+    expect(later.sent.map((m) => m.flow)).toEqual(["roue-2"]);
+  });
+
+  it("never holds back the first email of a chain (the wheel code)", async () => {
+    const { d, sent } = run(async () => NOW.getTime() - 60e3, { V5gzPH: [ev("b", 15)] });
+    await runEmailFlows(d);
+    expect(sent.map((m) => m.flow)).toEqual(["roue-1"]);
+  });
+
+  it("two reminders due in the same run for one person: only the first goes", async () => {
+    const events = { V5gzPH: [ev("c", 24 * 60 + 20), { ...ev("c2", 60 * 60 + 20), email: "c@client.ca", profileId: "p-c" }] };
+    const { d, sent } = run(async () => null, events);
+    const r = await runEmailFlows(d);
+    expect(sent).toHaveLength(1);
+    expect(Object.keys(r.skipped).some((k) => k.endsWith(":espacement"))).toBe(true);
+  });
+});

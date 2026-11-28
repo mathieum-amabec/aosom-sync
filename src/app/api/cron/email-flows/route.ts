@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import {
   acquireLease, countPendingOutbox, dueOutboxEmails, finishOutboxEmail, getEmailConsent, getEmailSendStatus, getSetting,
-  isEmailSuppressed, listConsentsNotInShopify, listSuppressionsNotInKlaviyo, listSuppressionsNotInShopify, markConsentInShopify,
+  isEmailSuppressed, lastEmailSentTo, listConsentsNotInShopify, listSuppressionsNotInKlaviyo, listSuppressionsNotInShopify, markConsentInShopify,
   markSuppressionInKlaviyo, markSuppressionInShopify, releaseLease, setSetting, wheelSpinsForEngine,
 } from "@/lib/database";
 import { RELAY_LEASE_KEY, RELAY_LEASE_TTL_S, flowsSendingAgain } from "@/lib/klaviyo-campaigns";
@@ -107,6 +107,8 @@ async function run(dryRun: boolean, cfg: Awaited<ReturnType<typeof loadEngineCon
     // the 15 $ code reminder (relance-code.ts) owns some checkouts: the generic reminder #2 yields to it, never both
     checkout2Yields: (ev) => genericCheckout2Yields(ev.id, ev.props, relance ?? {}, r2Active),
     send: (msg) => sendEmail(msg, cfg, deps!),
+    // follow-up reminders keep a few hours from any other email to the same person (two chains crossing)
+    lastEmailAt: async (email) => { const t = await lastEmailSentTo(emailKey(email)); return t == null ? null : t * 1000; },
     timeLeft: () => Date.now() - started < BUDGET_MS,
   }, { dryRun });
 

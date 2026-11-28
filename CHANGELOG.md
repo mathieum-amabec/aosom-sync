@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.75] - 2026-11-28
+
+### Fixed
+
+- **Email audit before the switch to free email (Resend domain verified 2026-11-28).** No email can go out twice for the same trigger (idempotency key in `email_sends`, the outbox and Resend; the relays and the engine read each other's bookkeeping; only the internal « Rapport matinal » Klaviyo flow is live, every other native Klaviyo flow is manual/draft). What was wrong, and is fixed:
+  - **Returns copy was out of date** in every flow email and in the Klaviyo relays' text fixes: « frais de 10 % + étiquette » → « 15 % du prix + livraison d'origine + étiquette » (policy for orders from 2026-11-26).
+  - **Two chains crossing could stack reminders** (a wheel winner who also abandons a checkout got roue-2 and checkout reminder #2 within the hour). Follow-up reminders (relance-2, roue-2, roue-3, bienvenue-2) now wait until the address had no email from us for 4 h (`FOLLOW_UP_SPACING_H`), retried inside their grace window; the first email of each chain and the price-drop alert are never held back.
+  - **Back-in-stock email showed the raw English supplier title**; it now shows the French storefront title (Shopify), and drops the unsupported « Les quantités peuvent partir vite ».
+  - **Price-drop email (Resend) had a French footer on English emails**; the footer now follows the email's language.
+  - The English cart and checkout reminders said « Ameublo Direct »; the EN brand is « Furnish Direct ».
+
 ## [0.5.107.74] - 2026-11-28
 
 ### Changed

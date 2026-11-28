@@ -213,7 +213,7 @@ const COPY = {
     subject: "You left something in your cart 🛒",
     preview: "Your pick is waiting at Ameublo Direct.",
     title: "Your pick is waiting",
-    intro: "You added these items to your cart at Ameublo Direct. We kept them aside for you:",
+    intro: "You added these items to your cart at Furnish Direct. We kept them aside for you:",
     cta: "Pick up where I left off",
     perks: "✔ Free shipping anywhere in Canada",
     help: "A question before ordering? Just reply to this email.",
