@@ -231,3 +231,75 @@ describe("runEmailFlows", () => {
     expect(idemKey(FLOWS[0], wheelEv("z", 1))).toBe("relance-1:z");
   });
 });
+
+describe("follow-up spacing (two chains crossing)", () => {
+  const NOW = new Date("2026-11-02T12:00:00.000Z");
+  const ago = (min: number) => new Date(NOW.getTime() - min * 60e3).toISOString();
+  const ev = (id: string, min: number): TriggerEvent => ({ id, profileId: `p-${id}`, email: `${id}@client.ca`, at: ago(min), props: sampleProps("roue-1", "fr") });
+
+  function run(lastEmailAt: FlowRunDeps["lastEmailAt"], events: Record<string, TriggerEvent[]>) {
+    let saved: EngineState | null = null;
+    const sent: OutgoingEmail[] = [];
+    const d: FlowRunDeps = {
+      now: NOW, mode: "live", takeover: { roue: ago(5 * 24 * 60) },
+      loadState: async () => saved, saveState: async (s) => { saved = JSON.parse(JSON.stringify(s)); },
+      events: async (m) => events[m] ?? [], relay: relayView(null, null), relance1Sent: async () => false,
+      flowSendingAgain: () => false, consentOf: async () => ({ consent: "SUBSCRIBED", suppressed: false }), recipientAllowed: () => true,
+      send: vi.fn(async (m: OutgoingEmail) => { sent.push(m); return { status: "sent" as const, id: `re_${sent.length}` }; }),
+      lastEmailAt, timeLeft: () => true,
+    };
+    return { d, sent, state: () => saved };
+  }
+
+  it("holds a wheel reminder back while the person got another email under 4 h ago, then sends it", async () => {
+    // roue-2 is due 24 h 10 after the spin (3 h grace)
+    const events = { V5gzPH: [ev("a", 24 * 60 + 20)] };
+    const recent = run(async () => NOW.getTime() - 60 * 60e3, events);
+    const r = await runEmailFlows(recent.d);
+    expect(r.skipped).toEqual({ "roue-2:espacement": 1 });
+    expect(recent.sent).toHaveLength(0);
+    expect(recent.state()?.done["roue-2"]?.["a"]).toBeUndefined(); // not marked: retried next run
+    const later = run(async () => NOW.getTime() - 5 * 3600e3, events);
+    await runEmailFlows(later.d);
+    expect(later.sent.map((m) => m.flow)).toEqual(["roue-2"]);
+  });
+
+  it("never holds back the first email of a chain (the wheel code)", async () => {
+    const { d, sent } = run(async () => NOW.getTime() - 60e3, { V5gzPH: [ev("b", 15)] });
+    await runEmailFlows(d);
+    expect(sent.map((m) => m.flow)).toEqual(["roue-1"]);
+  });
+
+  it("two reminders due in the same run for one person: only the first goes", async () => {
+    const events = { V5gzPH: [ev("c", 24 * 60 + 20), { ...ev("c2", 60 * 60 + 20), email: "c@client.ca", profileId: "p-c" }] };
+    const { d, sent } = run(async () => null, events);
+    const r = await runEmailFlows(d);
+    expect(sent).toHaveLength(1);
+    expect(Object.keys(r.skipped).some((k) => k.endsWith(":espacement"))).toBe(true);
+  });
+});
+
+describe("our own Klaviyo housekeeping suppression (USER_SUPPRESSED)", () => {
+  it("does not block an email we send ourselves; the person's own opt-outs still do", async () => {
+    const { suppressionBlocks } = await import("@/lib/email/consent");
+    const { klaviyoBlocks } = await import("@/lib/referral/launch");
+    const { subscriptionAllows } = await import("@/lib/cart-relay");
+    const admin = [{ reason: "USER_SUPPRESSED", timestamp: "2026-11-13T00:00:00Z" }];
+    expect(suppressionBlocks(admin)).toBe(false);
+    expect(suppressionBlocks([{ reason: "HARD_BOUNCE" }])).toBe(true);
+    expect(suppressionBlocks([...admin, { reason: "SPAM_COMPLAINT" }])).toBe(true);
+    expect(parseKlaviyoConsent({ data: { attributes: { subscriptions: { email: { marketing: { consent: "NEVER_SUBSCRIBED", suppression: admin } } } } } }).suppressed).toBe(false);
+    // referral launch: blocked through Klaviyo, allowed when we send it (Resend)
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: admin })).toBe(true);
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: admin }, { ownEmail: true })).toBe(false);
+    expect(klaviyoBlocks({ consent: "UNSUBSCRIBED", suppression: admin }, { ownEmail: true })).toBe(true);
+    expect(klaviyoBlocks({ consent: "NEVER_SUBSCRIBED", suppression: [{ reason: "HARD_BOUNCE" }] }, { ownEmail: true })).toBe(true);
+    // cart reminder: Klaviyo reports can_receive false for an admin-suppressed profile
+    const sub = (consent: string, suppression: unknown[], can = false) => ({ email: { marketing: { consent, suppression, can_receive_email_marketing: can } } });
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", admin))).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", admin), { ownEmail: true })).toBe(true);
+    expect(subscriptionAllows(sub("UNSUBSCRIBED", admin), { ownEmail: true })).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", [], false), { ownEmail: true })).toBe(false);
+    expect(subscriptionAllows(sub("NEVER_SUBSCRIBED", [], true), { ownEmail: true })).toBe(true);
+  });
+});

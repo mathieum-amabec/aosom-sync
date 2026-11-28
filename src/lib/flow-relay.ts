@@ -94,9 +94,12 @@ const INTERNAL = /^qa-|^ops-|@ameublodirect\.ca$/i;
  * 2nd-item discount applies to the cheaper of the two items.
  */
 const TEXT_FIXES: Array<[RegExp, string]> = [
-  [/Retours\s+acceptés\s+pendant\s+30\s+jours/g, "Retours sous 30 jours (frais de 10 % + étiquette de retour)"],
-  [/Retours\s+30\s+jours/g, "Retours sous 30 jours (frais de 10 % + étiquette)"],
-  [/30-day\s+returns(?!\s*\()/g, "30-day returns (10% fee + return label)"],
+  // returns policy of 2026-11-26: 15 % of the price + the real original delivery + the return label
+  [/Retours\s+acceptés\s+pendant\s+30\s+jours/g, "Retours sous 30 jours (15 % du prix + livraison d’origine + étiquette)"],
+  [/Retours\s+30\s+jours/g, "Retours sous 30 jours (15 % du prix + livraison d’origine + étiquette)"],
+  [/\(frais de 10\s*%\s*\+\s*étiquette(?: de retour)?\)/g, "(15 % du prix + livraison d’origine + étiquette)"],
+  [/30-day\s+returns(?!\s*\()/g, "30-day returns (15% of the price + original delivery + label)"],
+  [/\(10% fee \+ return label\)/g, "(15% of the price + original delivery + label)"],
   [/\s*Les quantités sont limitées — profites-en avant que le prix ne remonte\./g, ""],
   [/\s*Quantities are limited — grab it before the price goes back up\./g, ""],
   [/Ta commande est en route depuis quelques jours — on espère qu'elle te plaît !/g, "Ta commande est arrivée ? On espère qu'elle te plaît !"],

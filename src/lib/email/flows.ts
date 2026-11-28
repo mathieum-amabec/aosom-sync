@@ -47,7 +47,17 @@ export interface EngineFlow {
   step: RelayStep;
   consent: ConsentBasis;
   render: (props: Props) => EmailContent | null;
+  /**
+   * A reminder later in a chain (not the email the person is waiting for). It waits until the address had no email
+   * from us for FOLLOW_UP_SPACING_H, so two chains crossing (wheel + abandoned checkout) never stack two reminders
+   * within the hour. It is retried each run inside its grace window, then dropped. The first email of a chain
+   * (wheel code, reminder #1, welcome code) and the price-drop alert someone asked for are never held back.
+   */
+  followUp?: boolean;
 }
+
+/** Minimum gap between a follow-up reminder and the previous email to the same address. */
+export const FOLLOW_UP_SPACING_H = 4;
 
 /** Daily-cap priority of each group (engine.ts Priority): wheel codes first, then checkout reminders, reviews, marketing. */
 export const GROUP_PRIORITY: Record<FlowGroup, Priority> = { roue: 0, relance: 1, avis: 2, bienvenue: 3, "baisse-prix": 3 };
@@ -72,12 +82,12 @@ export const FLOWS: EngineFlow[] = [
   // except the unsubscribed/suppressed. relance-paiement.ts: 30 min after the checkout, up to 36 h, one per profile per 72 h
   ...def({ key: "relance-1", group: "relance", relayKey: RELANCE_PAIEMENT_RELAY, consent: "own", render: relance1,
     step: { key: "relance-1", flowId: "Xw6R8f", metricId: CHECKOUT_STARTED, offsetMin: 30, graceMin: 36 * 60 - 30, templateId: "", subject: "", preview: "", noOrderSinceTrigger: true, cooldownH: 72 } }),
-  ...def({ key: "relance-2", group: "relance", relayKey: "checkout-2", consent: "own", render: relance2, step: relayStep("checkout-2", { key: "relance-2" }) }),
+  ...def({ key: "relance-2", group: "relance", relayKey: "checkout-2", consent: "own", render: relance2, followUp: true, step: relayStep("checkout-2", { key: "relance-2" }) }),
   ...def({ key: "bienvenue-1", group: "bienvenue", relayKey: "welcome-1", consent: "express", render: bienvenue1, step: relayStep("welcome-1", { key: "bienvenue-1" }) }),
-  ...def({ key: "bienvenue-2", group: "bienvenue", relayKey: "welcome-2", consent: "express", render: bienvenue2, step: relayStep("welcome-2", { key: "bienvenue-2" }) }),
+  ...def({ key: "bienvenue-2", group: "bienvenue", relayKey: "welcome-2", consent: "express", render: bienvenue2, followUp: true, step: relayStep("welcome-2", { key: "bienvenue-2" }) }),
   ...def({ key: "roue-1", group: "roue", relayKey: "roue-1", consent: "own", render: roue1, step: relayStep("roue-1") }),
-  ...def({ key: "roue-2", group: "roue", relayKey: "roue-2", consent: "own", render: roue2, step: relayStep("roue-2") }),
-  ...def({ key: "roue-3", group: "roue", relayKey: "roue-3", consent: "own", render: roue3, step: relayStep("roue-3") }),
+  ...def({ key: "roue-2", group: "roue", relayKey: "roue-2", consent: "own", render: roue2, followUp: true, step: relayStep("roue-2") }),
+  ...def({ key: "roue-3", group: "roue", relayKey: "roue-3", consent: "own", render: roue3, followUp: true, step: relayStep("roue-3") }),
   ...def({ key: "avis", group: "avis", relayKey: "review", consent: "own", render: avis, step: relayStep("review", { key: "avis" }) }),
   ...def({ key: "baisse-prix", group: "baisse-prix", relayKey: "price-drop", consent: "own", render: baissePrix, step: relayStep("price-drop", { key: "baisse-prix" }) }),
 ];
@@ -250,6 +260,8 @@ export interface FlowRunDeps {
   /** Abandoned checkout #2: true when relance-code's 15 $ email owns this checkout (never both). */
   checkout2Yields?: (ev: TriggerEvent) => boolean;
   send: (msg: OutgoingEmail) => Promise<SendOutcome>;
+  /** Unix ms of the last email that went out to this address (any flow), or null. Absent = no spacing (tests). */
+  lastEmailAt?: (email: string) => Promise<number | null>;
   timeLeft: () => boolean;
 }
 
@@ -306,6 +318,13 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
     return consentCache.get(pid)!;
   };
   const bump = (o: Record<string, number>, k: string) => { o[k] = (o[k] ?? 0) + 1; };
+  // last email per address: the database for earlier runs, this map for what this run already sent
+  const lastAt = new Map<string, number | null>();
+  const lastEmail = async (email: string) => {
+    const key = emailKey(email);
+    if (!lastAt.has(key)) lastAt.set(key, d.lastEmailAt ? await d.lastEmailAt(email).catch(() => null) : null);
+    return lastAt.get(key) ?? null;
+  };
   if (opts.dryRun) res.due = {};
 
   for (const flow of flows) {
@@ -339,6 +358,11 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
       if (!mayEmail(c, flow.consent)) { mark(); bump(res.skipped, `${flow.key}:sans-consentement`); continue; }
       const content = flow.render(ev.props);
       if (!content) { mark(); bump(res.skipped, `${flow.key}:donnees-incompletes`); continue; }
+      if (flow.followUp) {
+        const last = await lastEmail(ev.email!);
+        // not marked: retried next run while the step's grace window lasts
+        if (last != null && now.getTime() - last < FOLLOW_UP_SPACING_H * 3600e3) { bump(res.skipped, `${flow.key}:espacement`); continue; }
+      }
       const out = await d.send({ to: ev.email!, flow: flow.key, idemKey: idemKey(flow, ev), kind: "marketing", priority: GROUP_PRIORITY[flow.group], locale: eventLocale(ev.props), ...content });
       if (out.status === "failed" && out.retryable) { res.failed.push({ flow: flow.key, error: out.error }); continue; } // retried next run
       // engine switched off or misconfigured mid-run, or Resend's daily cap reached: not this person's fault, try
@@ -347,6 +371,7 @@ export async function runEmailFlows(d: FlowRunDeps, opts: { dryRun?: boolean } =
       mark();
       if (out.status === "sent") {
         bump(res.sent, flow.key);
+        lastAt.set(emailKey(ev.email!), now.getTime());
         state.prof[k] = { ...(state.prof[k] ?? {}), [ev.profileId]: at };
         state.sent[k] = { ...(state.sent[k] ?? {}), [ev.id]: at };
       } else if (out.status === "failed") {

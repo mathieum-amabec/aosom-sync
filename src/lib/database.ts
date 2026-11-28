@@ -3480,6 +3480,7 @@ export interface TriggeredPriceAlert {
   currentPrice: number;
   productName: string | null;
   shopifyHandle: string | null;
+  shopifyProductId?: string | null;
 }
 
 /**
@@ -3548,7 +3549,8 @@ export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> 
   const db = await ensureSchema();
   const result = await db.execute(
     `SELECT a.id, a.email, a.sku, a.price_at_signup,
-            p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle
+            p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle,
+            p.shopify_product_id AS shopify_product_id
      FROM price_alerts a
      JOIN products p ON p.sku = a.sku
      WHERE a.notified_at IS NULL AND a.confirmed = 1 AND p.price < a.price_at_signup`,
@@ -3561,6 +3563,7 @@ export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> 
     currentPrice: Number(r.current_price),
     productName: (r.product_name as string) || null,
     shopifyHandle: (r.shopify_handle as string) || null,
+    shopifyProductId: r.shopify_product_id != null && r.shopify_product_id !== "" ? String(r.shopify_product_id) : null,
   }));
 }
 
@@ -3925,6 +3928,14 @@ export async function countEmailSendsSince(sinceSec: number): Promise<number> {
   const db = await ensureSchema();
   const r = await db.execute({ sql: `SELECT COUNT(*) AS n FROM email_sends WHERE created_at >= ? AND status NOT IN ('failed', 'skipped')`, args: [sinceSec] });
   return Number(rowToObj(r.rows[0]).n ?? 0);
+}
+
+/** Unix second of the last email that went out to this address (normalised key, any flow), or null. */
+export async function lastEmailSentTo(emailKey: string): Promise<number | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT MAX(created_at) AS t FROM email_sends WHERE email = ? AND status NOT IN ('failed', 'skipped')`, args: [emailKey] });
+  const t = Number(rowToObj(r.rows[0]).t);
+  return Number.isFinite(t) && t > 0 ? t : null;
 }
 
 // ─── Email outbox (Resend daily cap) ───────────────────────────────

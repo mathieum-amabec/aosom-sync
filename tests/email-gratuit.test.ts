@@ -183,6 +183,9 @@ describe("dispatchEvent: one call, Klaviyo or Resend", () => {
     send.mockResolvedValueOnce({ status: "skipped", reason: "suppressed" } as never);
     expect(await dispatchEvent(PRICE_ALERT_CONFIRM_EVENT, "c@x.ca", { confirm_url: "https://outils.ameublodirect.ca/api/price-alert/confirm?token=t", product_name: "Lit" }, {}, d))
       .toMatchObject({ ok: true, skipped: true, error: "suppressed" });
+    // data the email needs is missing (a link off our hosts): NOT ok, so the caller keeps the item instead of stamping it
+    expect(await dispatchEvent(PRICE_ALERT_CONFIRM_EVENT, "c@x.ca", { confirm_url: "https://admin.shopify.com/x", product_name: "Lit" }, {}, d))
+      .toMatchObject({ ok: false, via: "none", error: "données incomplètes" });
   });
 
   it("the default idem key is stable for the same data and differs otherwise", () => {
@@ -290,8 +293,11 @@ describe("wheel spins without Klaviyo", () => {
       consentOf: async () => ({ consent: "NEVER_SUBSCRIBED", suppressed: false }), recipientAllowed: () => true, send, timeLeft: () => true,
       checkout2Yields: (e) => e.id === "c9",
     };
-    // first run: state starts an hour ago, so give it a state that covers the checkout
-    d.loadState = async () => emptyEngineState(new Date(NOW.getTime() - 3 * 86_400e3).toISOString());
+    // first run: state starts an hour ago, so give it a state that covers the checkout (kept between runs, so
+    // reminder #1 is not resent and the follow-up spacing does not hold reminder #2 back behind it)
+    let saved = emptyEngineState(new Date(NOW.getTime() - 3 * 86_400e3).toISOString());
+    d.loadState = async () => saved;
+    d.saveState = async (s) => { saved = JSON.parse(JSON.stringify(s)); };
     await runEmailFlows(d);
     const keys = () => send.mock.calls.map((x) => (x as unknown as [OutgoingEmail])[0].idemKey);
     expect(keys()).not.toContain("relance-2:c9");

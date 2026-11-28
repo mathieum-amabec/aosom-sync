@@ -74,7 +74,7 @@ async function main() {
     if (!d.ok) { bump(d.reason); continue; }
     const key = rules.normalizeEmail(c.email) as string;
     if (seenKeys.has(key)) { bump("duplicate-email"); continue; }
-    const k = await launch.klaviyoStatus(c.email as string);
+    const k = await launch.klaviyoStatus(c.email as string, { ownEmail: VIA === "resend" });
     if (k !== "ok") { bump(k === "blocked" ? "klaviyo-suppressed" : "klaviyo-lookup-error"); continue; }
     seenKeys.add(key);
     eligible.push({ c, source: d.source, lang: rules.langOf(c.locale) });

@@ -15,11 +15,27 @@ export interface KlaviyoConsent {
 
 type ProfileJson = { data?: { attributes?: { subscriptions?: { email?: { marketing?: { consent?: string; can_receive_email_marketing?: boolean; suppression?: unknown[] } } } } } };
 
+/**
+ * Klaviyo suppression reason of a profile suppressed BY US to stay under the free plan's 250 active profiles
+ * (2026-11-13 clean-up: 40 Shopify subscribers; scripts/klaviyo-headroom.mts --apply), or by our unsubscribe push.
+ * It is housekeeping, not the person's choice: the person's own opt-outs show as consent UNSUBSCRIBED, HARD_BOUNCE or
+ * SPAM_COMPLAINT, and an unsubscribe from one of OUR emails is in Turso `email_suppressions`, which `sendEmail`
+ * checks before every marketing email. So it must not block an email we send ourselves (Resend). Klaviyo itself
+ * still refuses to deliver to these profiles, so nothing changes on the Klaviyo side.
+ */
+export const ADMIN_SUPPRESSION = "USER_SUPPRESSED";
+
+/** Does this Klaviyo suppression list block an email? Our own housekeeping suppression does not. */
+export function suppressionBlocks(list: unknown): boolean {
+  if (!Array.isArray(list)) return false;
+  return list.some((s) => String((s as { reason?: unknown } | null)?.reason ?? "").toUpperCase() !== ADMIN_SUPPRESSION);
+}
+
 export function parseKlaviyoConsent(j: ProfileJson): KlaviyoConsent {
   const m = j.data?.attributes?.subscriptions?.email?.marketing;
   return {
     consent: String(m?.consent ?? "UNKNOWN").toUpperCase(),
-    suppressed: (Array.isArray(m?.suppression) && m!.suppression!.length > 0),
+    suppressed: suppressionBlocks(m?.suppression),
   };
 }
 

@@ -14,6 +14,7 @@
  */
 import { kv, type RawEvent } from "./klaviyo-campaigns";
 import { esc, money } from "./relance-paiement";
+import { suppressionBlocks } from "./email/consent";
 
 export const ADDED_TO_CART_METRIC = "Added to Cart";
 export const ADDED_TO_CART_ID = "SmdQyJ";
@@ -175,12 +176,19 @@ export function selectCarts(
   return { send, skipped };
 }
 
-/** Klaviyo `subscriptions.email.marketing` → may we email this profile? Unknown → no. */
-export function subscriptionAllows(sub: unknown): boolean {
+/**
+ * Klaviyo `subscriptions.email.marketing` → may we email this profile? Unknown → no.
+ * `ownEmail` (email_provider "resend", we send it ourselves): a profile whose ONLY obstacle is the suppression we
+ * applied to stay under Klaviyo's free-plan cap (USER_SUPPRESSED, src/lib/email/consent.ts) is allowed; Klaviyo sets
+ * can_receive_email_marketing to false for it, so that flag is not read then. Opt-outs still block.
+ */
+export function subscriptionAllows(sub: unknown, opts: { ownEmail?: boolean } = {}): boolean {
   const m = (sub as { email?: { marketing?: { can_receive_email_marketing?: boolean; consent?: string; suppression?: unknown[] } } } | null | undefined)?.email?.marketing;
   if (!m) return false;
-  if (m.can_receive_email_marketing !== true) return false;
   if (String(m.consent ?? "").toUpperCase() === "UNSUBSCRIBED") return false;
+  const adminOnly = Array.isArray(m.suppression) && m.suppression.length > 0 && !suppressionBlocks(m.suppression);
+  if (opts.ownEmail && adminOnly) return true;
+  if (m.can_receive_email_marketing !== true) return false;
   return !(Array.isArray(m.suppression) && m.suppression.length);
 }
 
@@ -213,7 +221,7 @@ const COPY = {
     subject: "You left something in your cart 🛒",
     preview: "Your pick is waiting at Ameublo Direct.",
     title: "Your pick is waiting",
-    intro: "You added these items to your cart at Ameublo Direct. We kept them aside for you:",
+    intro: "You added these items to your cart at Furnish Direct. We kept them aside for you:",
     cta: "Pick up where I left off",
     perks: "✔ Free shipping anywhere in Canada",
     help: "A question before ordering? Just reply to this email.",
@@ -277,7 +285,7 @@ export function cartEmail(c: Cart, now: Date = new Date()): { subject: string; p
 // ─── Klaviyo IO ─────────────────────────────────────────────────────────
 
 /** Subscription status + locale of the given profiles (100 per call). Missing profile → absent. */
-export async function fetchProfileInfo(ids: string[]): Promise<Map<string, { allowed: boolean; locale: "fr" | "en" | null }>> {
+export async function fetchProfileInfo(ids: string[], opts: { ownEmail?: boolean } = {}): Promise<Map<string, { allowed: boolean; locale: "fr" | "en" | null }>> {
   const out = new Map<string, { allowed: boolean; locale: "fr" | "en" | null }>();
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
@@ -285,7 +293,7 @@ export async function fetchProfileInfo(ids: string[]): Promise<Map<string, { all
       "GET", `/profiles/?filter=${encodeURIComponent(`any(id,[${chunk.map((x) => `"${x}"`).join(",")}])`)}&additional-fields[profile]=subscriptions&fields[profile]=locale&page[size]=100`);
     for (const p of j.data) {
       const l = typeof p.attributes.locale === "string" ? (p.attributes.locale.toLowerCase().startsWith("en") ? "en" : "fr") : null;
-      out.set(p.id, { allowed: subscriptionAllows(p.attributes.subscriptions), locale: l });
+      out.set(p.id, { allowed: subscriptionAllows(p.attributes.subscriptions, opts), locale: l });
     }
   }
   return out;

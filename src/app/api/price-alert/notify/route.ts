@@ -10,6 +10,7 @@ import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { getTriggeredPriceAlerts, markPriceAlertsNotified } from "@/lib/database";
 import { dispatchEvent } from "@/lib/email/dispatch";
+import { getShopifyProductTitle } from "@/lib/shopify-client";
 
 export const maxDuration = 60;
 
@@ -23,6 +24,13 @@ export async function GET(request: Request) {
   const alerts = await getTriggeredPriceAlerts();
   const notifiedIds: number[] = [];
   let failed = 0;
+  // products.name is the raw ENGLISH supplier title: the email shows the French storefront title (one read per product)
+  const titles = new Map<string, string>();
+  const titleOf = async (id: string | null) => {
+    if (!id) return "";
+    if (!titles.has(id)) titles.set(id, await getShopifyProductTitle(id, ""));
+    return titles.get(id)!;
+  };
 
   for (const alert of alerts) {
     const productUrl = alert.shopifyHandle
@@ -31,7 +39,7 @@ export async function GET(request: Request) {
     // Klaviyo event, or the email itself through Resend (settings email_provider, src/lib/email/dispatch.ts)
     const res = await dispatchEvent("Price Drop Alert", alert.email, {
       sku: alert.sku,
-      product_name: alert.productName,
+      product_name: await titleOf(alert.shopifyProductId ?? null),
       old_price: alert.priceAtSignup,
       new_price: alert.currentPrice,
       product_url: productUrl,

@@ -9,7 +9,7 @@
 import { getPublicAppUrl } from "@/lib/config";
 import { button, esc, type Locale } from "./layout";
 import type { Priority } from "./engine";
-import { baissePrix, money, safeUrl, type EmailContent, type Props } from "./templates";
+import { baissePrix, eventLocale, money, safeUrl, type EmailContent, type Props } from "./templates";
 
 export interface DirectEmail extends EmailContent {
   /** "transactional" = asked for or internal (CASL-exempt); "marketing" respects unsubscribes. */
@@ -86,7 +86,7 @@ function backInStock(props: Props): DirectEmail | null {
   return {
     subject: "C'est de retour en stock ! 🎉",
     preheader: name ? `${name} est de nouveau disponible.` : "Un produit que tu attendais est de retour.",
-    bodyHtml: h1("C'est de retour en stock 🎉") + p("Un produit que tu attendais est de nouveau disponible. Les quantités peuvent partir vite.") + (name ? p(`<b>${esc(name)}</b>`) : "") + priceHtml + button(url, "Voir le produit"),
+    bodyHtml: h1("C'est de retour en stock 🎉") + p("Un produit que tu attendais est de nouveau disponible.") + (name ? p(`<b>${esc(name)}</b>`) : "") + priceHtml + button(url, "Voir le produit"),
     bodyText: `C'est de retour en stock\n\nUn produit que tu attendais est de nouveau disponible.\n${name}\n\nVoir le produit : ${url}`,
     kind: "marketing",
     priority: 3,
@@ -154,7 +154,8 @@ export const DIRECT: Record<string, Renderer> = {
   [BACK_IN_STOCK_CONFIRM_EVENT]: (props) => confirmEmail("stock", props),
   [PRICE_DROP_EVENT]: (props) => {
     const c = baissePrix(props);
-    return c ? { ...c, kind: "marketing", priority: 3, locale: "fr" } : null;
+    // the footer follows the email's language (baissePrix already writes FR or EN from the event)
+    return c ? { ...c, kind: "marketing", priority: 3, locale: eventLocale(props) } : null;
   },
   [BACK_IN_STOCK_EVENT]: backInStock,
   [REFERRAL_CREDIT_EVENT]: referralCredit,

@@ -159,13 +159,22 @@ export async function POST(request: Request) {
 
   // Who sends the 3 code emails. settings email_provider = "resend": our engine reads this spin from Turso, and
   // NOTHING goes to Klaviyo (no profile: the free plan is capped at 250). Otherwise the Klaviyo event, as before.
-  const via = (await currentRoute().catch(() => "klaviyo")) === "resend" ? "resend" : "klaviyo";
+  let via: "resend" | "klaviyo" = (await currentRoute().catch(() => "klaviyo")) === "resend" ? "resend" : "klaviyo";
+  // Resend: the engine finds this spin ONLY through this row (email_via = 'resend', consent = 1). One retry; if the row
+  // still cannot be written, fall back to the Klaviyo event, which the engine also reads (wheel-source.ts), so the 3
+  // code emails still go out instead of silently never.
+  let stored = false;
+  for (let i = 0; i < 2 && !stored; i++) {
+    try { await setWheelSpinEmailVia(emailKey, consent, via); stored = true; } catch (err) {
+      console.warn(`[roue] could not record email_via for ${emailKey} (try ${i + 1}): ${err}`);
+    }
+  }
+  if (!stored && via === "resend") via = "klaviyo";
   try {
-    await setWheelSpinEmailVia(emailKey, consent, via);
     // the ticked box is ALSO kept in our own table, whatever the provider: no consent ever lives only in Klaviyo
     if (consent) await recordEmailConsent({ email, source: "roue", locale });
   } catch (err) {
-    console.warn(`[roue] could not record consent/email_via for ${emailKey}: ${err}`);
+    console.warn(`[roue] could not record consent for ${emailKey}: ${err}`);
   }
 
   // Best effort: the visitor already sees the code on screen, so a Klaviyo hiccup must not fail the spin.

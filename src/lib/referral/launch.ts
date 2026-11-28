@@ -9,6 +9,7 @@
 import { shopifyFetch } from "@/lib/shopify-client";
 import { env } from "@/lib/config";
 import { normalizeEmail, type AddressLike } from "./rules";
+import { suppressionBlocks } from "@/lib/email/consent";
 
 export const BUYER_WINDOW_DAYS = 730;
 
@@ -123,10 +124,16 @@ interface KlaviyoMarketing {
   suppression?: Array<{ reason?: string }>;
 }
 
-/** True when Klaviyo must not email this profile: unsubscribed, or on a suppression list (bounce, spam complaint…). */
-export function klaviyoBlocks(marketing: KlaviyoMarketing | null | undefined): boolean {
+/**
+ * True when this profile must not be emailed: unsubscribed, or on a suppression list (bounce, spam complaint…).
+ * `ownEmail` (--via resend, we send it ourselves): the suppression we applied to stay under Klaviyo's free-plan cap
+ * (reason USER_SUPPRESSED, see src/lib/email/consent.ts) does not block; the person's own opt-outs still do, and our
+ * unsubscribes are re-checked in Turso at send time.
+ */
+export function klaviyoBlocks(marketing: KlaviyoMarketing | null | undefined, opts: { ownEmail?: boolean } = {}): boolean {
   if (!marketing) return false;
   if ((marketing.consent ?? "").toUpperCase() === "UNSUBSCRIBED") return true;
+  if (opts.ownEmail) return suppressionBlocks(marketing.suppression);
   return Array.isArray(marketing.suppression) && marketing.suppression.length > 0;
 }
 
@@ -134,13 +141,13 @@ export function klaviyoBlocks(marketing: KlaviyoMarketing | null | undefined): b
  * Klaviyo's verdict for an email: "blocked", "ok" (no profile = nothing blocks), or "error" (unknown — the script then
  * EXCLUDES the customer: the safe side is to miss one, never to email someone who opted out).
  */
-export async function klaviyoStatus(email: string): Promise<"ok" | "blocked" | "error"> {
+export async function klaviyoStatus(email: string, opts: { ownEmail?: boolean } = {}): Promise<"ok" | "blocked" | "error"> {
   const filter = encodeURIComponent(`equals(email,"${email.replace(/"/g, "")}")`);
   const r = await klaviyo("GET", `/profiles/?filter=${filter}&additional-fields[profile]=subscriptions`);
   if (!r.ok || !r.json) return "error";
   const data = r.json.data as Array<{ attributes?: { subscriptions?: { email?: { marketing?: KlaviyoMarketing } } } }> | undefined;
   if (!data || data.length === 0) return "ok";
-  return data.some((p) => klaviyoBlocks(p.attributes?.subscriptions?.email?.marketing)) ? "blocked" : "ok";
+  return data.some((p) => klaviyoBlocks(p.attributes?.subscriptions?.email?.marketing, opts)) ? "blocked" : "ok";
 }
 
 export interface ReferralProfileProps {

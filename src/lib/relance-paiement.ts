@@ -180,7 +180,7 @@ const COPY = {
     subject: "Your cart is waiting 🛒",
     preview: "Your items are still in your cart.",
     title: "Forgot something?",
-    intro: "You started an order at Ameublo Direct but didn't finish it. Your items are waiting:",
+    intro: "You started an order at Furnish Direct but didn't finish it. Your items are waiting:",
     cta: "Complete my order",
     perks: "✔ Free shipping anywhere in Canada<br>✔ 10% off the cheaper of 2 items, applied automatically in the cart",
     help: "A question before ordering? Just reply to this email.",

@@ -30,8 +30,9 @@ describe("template rewriting", () => {
   });
   it("fixes the returns, price-drop, review and 2nd-item wording", () => {
     const out = rewriteBody(`<p>✓ Retours acceptés pendant 30 jours</p><p>Retours 30 jours · 30-day returns</p><p>en promotion. Les quantités sont limitées — profites-en avant que le prix ne remonte.</p><p>Ta commande est en route depuis quelques jours — on espère qu'elle te plaît !</p><p>Astuce : ajoute un 2<sup>e</sup> article et il passe à <b>10 % de rabais</b></p><a href="{{ event.url|default:'https://x' }}">`, "k");
-    expect(out).toContain("Retours sous 30 jours (frais de 10 % + étiquette de retour)");
-    expect(out).toContain("30-day returns (10% fee + return label)");
+    expect(out).toContain("Retours sous 30 jours (15 % du prix + livraison d’origine + étiquette)");
+    expect(out).not.toContain("10 % + étiquette");
+    expect(out).toContain("30-day returns (15% of the price + original delivery + label)");
     expect(out).not.toContain("quantités sont limitées");
     expect(out).toContain("Ta commande est arrivée ? On espère qu'elle te plaît !");
     expect(out).toContain("le moins cher des deux est à <b>10 % de rabais</b>");

@@ -26,6 +26,7 @@ import {
   deleteProductMetafield,
   fetchVariant,
   attachVariantImages,
+  getShopifyProductTitle,
 } from "@/lib/shopify-client";
 import {
   writePriceVerified,
@@ -501,12 +502,15 @@ export async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
       const product = await getProduct(sku);
       if (!product) continue;
       const productUrl = storeLink(product.shopify_product_id, product.shopify_handle).shopifyUrl;
+      // products.name is the raw ENGLISH supplier title: the email shows the curated French storefront title
+      // (empty on a Shopify hiccup → the email uses its generic wording)
+      const titleFr = product.shopify_product_id ? await getShopifyProductTitle(String(product.shopify_product_id), "") : "";
       let sent = 0;
       for (const { id, email } of pending) {
         // Klaviyo event, or the email itself through Resend (settings email_provider, src/lib/email/dispatch.ts)
         const res = await dispatchEvent("Back In Stock", email, {
           sku,
-          title_fr: product.name || sku,
+          title_fr: titleFr,
           price: product.price,
           product_url: productUrl,
           image_url: product.image1 || null,

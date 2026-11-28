@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.75] - 2026-11-28
+
+### Fixed
+
+- **Email audit before the switch to free email (Resend domain verified 2026-11-28).** No email can go out twice for the same trigger (idempotency key in `email_sends`, the outbox and Resend; the relays and the engine read each other's bookkeeping; only the internal « Rapport matinal » Klaviyo flow is live, every other native Klaviyo flow is manual/draft). What was wrong, and is fixed:
+  - **Returns copy was out of date** in every flow email and in the Klaviyo relays' text fixes: « frais de 10 % + étiquette » → « 15 % du prix + livraison d'origine + étiquette » (policy for orders from 2026-11-26).
+  - **Two chains crossing could stack reminders** (a wheel winner who also abandons a checkout got roue-2 and checkout reminder #2 within the hour). Follow-up reminders (relance-2, roue-2, roue-3, bienvenue-2) now wait until the address had no email from us for 4 h (`FOLLOW_UP_SPACING_H`), retried inside their grace window; the first email of each chain and the price-drop alert are never held back.
+  - **Back-in-stock email showed the raw English supplier title**; it now shows the French storefront title (Shopify), and drops the unsupported « Les quantités peuvent partir vite ».
+  - **Price-drop email (Resend) had a French footer on English emails**; the footer now follows the email's language.
+  - The English cart and checkout reminders said « Ameublo Direct »; the EN brand is « Furnish Direct ».
+  - **Our own Klaviyo housekeeping suppression no longer blocks emails we send ourselves.** The 2026-11-13 clean-up (and
+    `klaviyo-headroom --apply`) suppressed profiles with reason `USER_SUPPRESSED` to stay under the free plan's 250 —
+    40 of them are Shopify email subscribers. Through Resend that reason no longer blocks (engine consent, cart
+    reminder, referral launch `--via resend`: eligible 222 → 263); unsubscribes, bounces and complaints still do, and our
+    own unsubscribes are re-checked in Turso before every marketing email.
+  - The cart reminder's « checkout reminder sent in the last 72 h » rule now also sees the engine's reminder #1
+    (with `email_provider` = resend, relance-paiement no longer records it).
+  - Price-alert confirmation, back-in-stock confirmation and price-drop emails show the French storefront title, not
+    the raw English supplier title; the confirmation links' fallback host is `outils.ameublodirect.ca`, never the
+    vercel.app name.
+  - `dispatchEvent` answers `ok: false` when an email's data is incomplete, so the waitlist / price alerts keep the item
+    instead of stamping it notified.
+  - A wheel spin whose Turso row cannot be written (Resend mode) falls back to the Klaviyo event, which the engine also
+    reads, instead of never getting its 3 code emails.
+
 ## [0.5.107.74] - 2026-11-28
 
 ### Changed

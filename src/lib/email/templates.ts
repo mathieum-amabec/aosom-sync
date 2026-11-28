@@ -1,7 +1,8 @@
 /**
  * The flow emails, as code (FR and EN, one language per email). Copy ported from the Klaviyo
  * templates the relays send today (flow-relay.ts STEPS + relance-paiement.ts), with the same text
- * fixes already applied (returns 10 % + label, 2nd-item discount on the cheaper item).
+ * fixes already applied (returns: 15 % of the price + original delivery + label for orders from 2026-11-26;
+ * 2nd-item discount on the cheaper item).
  *
  * Each renderer reads the trigger event's properties and returns null when the event lacks what the
  * email needs (no checkout link, no code…): better no email than a broken one. Every link in an
@@ -43,8 +44,8 @@ const codeBox = (code: string) => `<p style="margin:16px 0;text-align:center"><s
 const shopUrl = (l: Locale, path = "/collections/all") => `${STORE}${l === "en" ? "/en" : ""}${path}`;
 
 const PERKS = {
-  fr: ["Livraison gratuite partout au Canada", "Retours sous 30 jours (frais de 10 % + étiquette de retour)", "Paiement en 4 versements sans intérêts"],
-  en: ["Free shipping anywhere in Canada", "30-day returns (10% fee + return label)", "Pay in 4 interest-free instalments"],
+  fr: ["Livraison gratuite partout au Canada", "Retours sous 30 jours (15 % du prix + livraison d’origine + étiquette)", "Paiement en 4 versements sans intérêts"],
+  en: ["Free shipping anywhere in Canada", "30-day returns (15% of the price + original delivery + label)", "Pay in 4 interest-free instalments"],
 };
 const perksHtml = (l: Locale) => p(PERKS[l].map((x) => `✓ ${esc(x)}`).join("<br>"));
 const perksText = (l: Locale) => PERKS[l].map((x) => `✓ ${x}`).join("\n");
