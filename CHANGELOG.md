@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.74] - 2026-11-28
+
+### Changed
+
+- **The email footer's mailing address is optional.** Mat's lawyer (2026-11-28): as a dropshipping business with no premises, Ameublo Direct is not required to print a postal address. `configProblems` no longer blocks the Resend engine when `email_mailing_address` is empty, the footer then shows the sender name + unsubscribe link only (no dangling « · »), the dashboard accepts an empty value, and the preview no longer prints a placeholder. docs/EMAIL-GRATUIT.md and CLAUDE.md updated.
+
 ## [0.5.107.73] - 2026-11-27
 
 ### Added

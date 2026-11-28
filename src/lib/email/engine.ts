@@ -147,7 +147,8 @@ export function configProblems(c: EngineConfig): string[] {
   if (!/^[^<>]*<[^\s@<>]+@[^\s@<>]+>$|^[^\s@<>]+@[^\s@<>]+$/.test(c.from)) p.push("EMAIL_FROM manquant ou invalide (ex. « Ameublo Direct <bonjour@ameublodirect.ca> »)");
   if (!c.tokenSecret) p.push("EMAIL_TOKEN_SECRET manquant (32 caractères minimum)");
   if (!c.baseUrl) p.push("URL publique de l’app inconnue (NEXT_PUBLIC_APP_URL)");
-  if (c.mailingAddress.length < 10) p.push("adresse postale manquante (réglage email_mailing_address, exigée par la loi anti-pourriel)");
+  // 2026-11-28: the mailing address is OPTIONAL. Mat's lawyer: as a dropshipping business with no premises we are not
+  // required to print one. When the setting is empty the footer shows the sender name + unsubscribe link only.
   return p;
 }
 

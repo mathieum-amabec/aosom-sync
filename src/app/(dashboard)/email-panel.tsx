@@ -130,7 +130,7 @@ export function EmailPanel() {
               </div>
             )}
             <label className="block">
-              <span className="text-gray-400">Adresse postale du pied de page (exigée par la loi)</span>
+              <span className="text-gray-400">Adresse postale du pied de page (facultative — vide = aucune adresse)</span>
               <div className="flex gap-2 mt-1">
                 <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="ex. C.P. 123, Saint-Hubert QC J3Y 0A1" className="flex-1 min-w-0 px-3 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white" />
                 <button disabled={busy} onClick={() => post({ action: "address", value: address })} className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300">Enregistrer</button>

@@ -32,6 +32,8 @@ export interface LayoutInput {
 export function renderLayout(i: LayoutInput): { html: string; text: string } {
   const f = FOOTER[i.locale];
   const brand = BRAND[i.locale];
+  // Optional since 2026-11-28 (lawyer: not required for a dropshipping business with no premises): empty = left out.
+  const addr = (i.mailingAddress ?? "").trim();
   const html = `<!doctype html><html lang="${i.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light"><title>${esc(brand)}</title></head>
 <body style="margin:0;background:#f4f1ec">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(i.preheader)}</div>
@@ -40,9 +42,9 @@ export function renderLayout(i: LayoutInput): { html: string; text: string } {
 <tr><td style="padding:24px 24px 8px;font:bold 20px Arial,sans-serif;color:#222">${esc(brand)}</td></tr>
 <tr><td style="padding:0 24px 24px;font:15px/1.5 Arial,sans-serif;color:#333">${i.bodyHtml}</td></tr>
 </table>
-<p style="font:12px/1.6 Arial,sans-serif;color:#777;max-width:560px;margin:16px auto 0">${esc(f.why)}<br>${esc(brand)} · ${esc(i.mailingAddress)}<br><a href="${esc(i.unsubscribeUrl)}" style="color:#777">${f.unsub}</a></p>
+<p style="font:12px/1.6 Arial,sans-serif;color:#777;max-width:560px;margin:16px auto 0">${esc(f.why)}<br>${esc(brand)}${addr ? ` · ${esc(addr)}` : ""}<br><a href="${esc(i.unsubscribeUrl)}" style="color:#777">${f.unsub}</a></p>
 </td></tr></table></body></html>`;
-  const text = `${i.bodyText.trim()}\n\n--\n${f.why}\n${brand} · ${i.mailingAddress}\n${f.unsub} : ${i.unsubscribeUrl}\n`;
+  const text = `${i.bodyText.trim()}\n\n--\n${f.why}\n${brand}${addr ? ` · ${addr}` : ""}\n${f.unsub} : ${i.unsubscribeUrl}\n`;
   return { html, text };
 }
 

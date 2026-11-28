@@ -123,7 +123,7 @@ describe("engine gates", () => {
 
   it("names every missing piece of configuration", () => {
     expect(configProblems(cfg())).toEqual([]);
-    expect(configProblems(cfg({ apiKey: "", from: "nope", tokenSecret: "", baseUrl: "", mailingAddress: "" }))).toHaveLength(5);
+    expect(configProblems(cfg({ apiKey: "", from: "nope", tokenSecret: "", baseUrl: "", mailingAddress: "" }))).toHaveLength(4);
   });
 
   it("off sends nothing and touches nothing", async () => {
@@ -139,11 +139,14 @@ describe("engine gates", () => {
     expect(await sendEmail(msg({ to: "Mat@Ameublo.ca" }), c, d)).toMatchObject({ status: "sent" });
   });
 
-  it("refuses to send without the mailing address (CASL)", async () => {
+  it("sends without a mailing address (optional since 2026-11-28) and leaves it out of the footer", async () => {
     const d = deps();
     const r = await sendEmail(msg(), cfg({ mailingAddress: "" }), d);
-    expect(r).toMatchObject({ status: "skipped", reason: "not-configured" });
-    expect(d.send).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ status: "sent" });
+    const { html, text } = renderLayout({ locale: "fr", preheader: "p", bodyHtml: "<p>x</p>", bodyText: "x", mailingAddress: "", unsubscribeUrl: "https://u.ca/x" });
+    expect(html).not.toContain(" · <br>");
+    expect(text).not.toContain(" · \n");
+    expect(html).toContain("https://u.ca/x");
   });
 
   it("skips suppressed addresses for marketing only", async () => {

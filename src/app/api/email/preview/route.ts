@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   const locale = u.searchParams.get("locale") === "en" ? "en" : "fr";
   const content = flow.render(sampleProps(flow.key, locale));
   if (!content) return NextResponse.json({ error: "sample-incomplete" }, { status: 500 });
-  const address = ((await getSetting(ADDRESS_KEY)) ?? "").trim() || "[adresse postale à venir]";
+  const address = ((await getSetting(ADDRESS_KEY)) ?? "").trim();
   const email = buildEmail(
     { to: "exemple@exemple.ca", flow: flow.key, idemKey: "preview", kind: "marketing", locale, ...content },
     { from: process.env.EMAIL_FROM || "Ameublo Direct <bonjour@ameublodirect.ca>", replyTo: "", mailingAddress: address, tokenSecret: "x".repeat(32), baseUrl: u.origin },
