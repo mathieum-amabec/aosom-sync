@@ -76,7 +76,8 @@ import {
   type ProductSnapshot,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
-import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
+import { isKlaviyoConfigured } from "@/lib/klaviyo-client";
+import { currentRoute, dispatchEvent } from "@/lib/email/dispatch";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
 import { runRemovedFromFeedDraft, runCatalogFreshnessZero } from "@/lib/removed-catalog";
@@ -489,7 +490,7 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
  */
 export async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
   if (skus.length === 0) return;
-  if (!isKlaviyoConfigured()) {
+  if (!isKlaviyoConfigured() && (await currentRoute().catch(() => "klaviyo")) !== "resend") {
     log(`Back-in-stock: ${skus.length} restock(s) détecté(s) mais Klaviyo non configuré — notifications ignorées`);
     return;
   }
@@ -502,13 +503,14 @@ export async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
       const productUrl = storeLink(product.shopify_product_id, product.shopify_handle).shopifyUrl;
       let sent = 0;
       for (const { id, email } of pending) {
-        const res = await trackEvent("Back In Stock", email, {
+        // Klaviyo event, or the email itself through Resend (settings email_provider, src/lib/email/dispatch.ts)
+        const res = await dispatchEvent("Back In Stock", email, {
           sku,
           title_fr: product.name || sku,
           price: product.price,
           product_url: productUrl,
           image_url: product.image1 || null,
-        });
+        }, { idemKey: `retour-en-stock:${id}` });
         if (res.ok) {
           // Stamp this recipient immediately — if the function is killed mid-batch
           // (Vercel SIGKILL / 800s), the next run must not re-email anyone already sent.

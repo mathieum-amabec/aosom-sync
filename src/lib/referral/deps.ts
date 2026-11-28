@@ -1,7 +1,7 @@
 /** Production wiring of the referral-credits cron: Turso store + Shopify Admin + Klaviyo. */
 import crypto from "crypto";
 import { getSetting } from "@/lib/database";
-import { trackEvent } from "@/lib/klaviyo-client";
+import { dispatchEvent } from "@/lib/email/dispatch";
 import type { ReferralCreditDeps } from "./credits";
 import { CREDIT_EVENT } from "./credits";
 import * as shop from "./shopify";
@@ -23,7 +23,9 @@ export function defaultReferralDeps(): ReferralCreditDeps {
     takeCreditSlot: store.takeCreditSlot,
     giveBackCreditSlot: store.giveBackCreditSlot,
     createCreditCode: () => shop.createReferralDiscount("credit"),
-    notifyCredit: (email, props) => trackEvent(CREDIT_EVENT, email, props),
+    // Klaviyo event (flow) by default; with settings email_provider = "resend" the email itself through Resend.
+    // One email per credit code: the idem key never lets a retry mail it twice.
+    notifyCredit: (email, props) => dispatchEvent(CREDIT_EVENT, email, props, { idemKey: `parrainage-credit:${String(props.code ?? "")}`, maxDelayH: 7 * 24 }),
     creditedUsesToRecheck: store.creditedUsesToRecheck,
     fetchOrderStatus: shop.fetchOrderStatus,
     discountUsage: shop.discountUsage,

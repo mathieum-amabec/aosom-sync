@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
 import { getSetting, setSetting } from "@/lib/database";
-import { trackEvent } from "@/lib/klaviyo-client";
+import { dispatchEvent } from "@/lib/email/dispatch";
 import {
   REPORT_LOCAL_HOUR,
   collectMorningReport,
@@ -76,15 +76,17 @@ export async function GET(request: Request) {
 
         const recipient = env.morningReportEmail;
         if (!recipient) throw new Error("MORNING_REPORT_EMAIL non configuré — rapport non envoyé");
-        const sent = await trackEvent(KLAVIYO_METRIC, recipient, {
+        // Klaviyo event (default) or, with settings email_provider = "resend", the email itself through Resend
+        // (src/lib/email/dispatch.ts). One idem key per day: a retried cron never mails it twice; ?force=1 resends.
+        const sent = await dispatchEvent(KLAVIYO_METRIC, recipient, {
           subject: report.subject,
           body_html: report.html,
           body_text: report.text,
           report_date: clock.date,
           missing_sections: report.missingSections,
-        });
+        }, { idemKey: force ? `rapport-matinal:${clock.date}:force-${now.getTime()}` : `rapport-matinal:${clock.date}`, maxDelayH: 12 });
         if (!sent.ok) {
-          throw new Error(`envoi Klaviyo échoué: ${sent.skipped ? "KLAVIYO_API_KEY absente" : sent.error ?? "inconnu"}`);
+          throw new Error(`envoi ${sent.via === "klaviyo" ? "Klaviyo" : "Resend"} échoué: ${sent.skipped ? "clé API absente" : sent.error ?? "inconnu"}`);
         }
         await setSetting(LAST_SENT_KEY, clock.date);
         return { sent: true as const, date: clock.date, missingSections: report.missingSections };

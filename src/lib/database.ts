@@ -957,6 +957,35 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_email_sends_resend ON email_sends(resend_id)`,
     `CREATE INDEX IF NOT EXISTS idx_email_sends_flow ON email_sends(flow, created_at)`,
+    // Free email (Resend, src/lib/email/outbox.ts): emails waiting for room under Resend's free daily cap (100/day).
+    // payload = the OutgoingEmail JSON, sent as-is. idem_key is the same key email_sends uses, so a queued email can
+    // never go out twice. Drained by /api/cron/email-flows, highest priority (0) first.
+    `CREATE TABLE IF NOT EXISTS email_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      idem_key TEXT NOT NULL UNIQUE,
+      priority INTEGER NOT NULL,
+      not_before INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'skipped', 'failed', 'expired')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_email_outbox_due ON email_outbox(status, priority, not_before)`,
+    // Marketing consent collected by OUR forms (the wheel today), kept here so it no longer needs a Klaviyo profile
+    // (settings email_provider = "resend"). email = trimmed lower-case. 'unsubscribed' is never turned back by a form.
+    // in_shopify: 0 = not pushed to the Shopify customer, 1 = pushed, 2 = Shopify refused it for good.
+    `CREATE TABLE IF NOT EXISTS email_consents (
+      email TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK (status IN ('subscribed', 'unsubscribed')),
+      source TEXT NOT NULL,
+      locale TEXT,
+      in_shopify INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -1059,6 +1088,18 @@ async function _initSchemaImpl(): Promise<void> {
   const esInfo = await db.execute(`PRAGMA table_info(email_suppressions)`);
   if (!esInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "in_klaviyo")) {
     await runBatch("email_suppressions add in_klaviyo", [{ sql: `ALTER TABLE email_suppressions ADD COLUMN in_klaviyo INTEGER NOT NULL DEFAULT 0`, args: [] }]);
+  }
+  // email_suppressions.in_shopify (0 = to push to the Shopify customer, 1 = done or no customer, 2 = refused for good):
+  // an unsubscribe from one of OUR emails must also stop Shopify Email campaigns (CASL).
+  if (!esInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "in_shopify")) {
+    await runBatch("email_suppressions add in_shopify", [{ sql: `ALTER TABLE email_suppressions ADD COLUMN in_shopify INTEGER NOT NULL DEFAULT 0`, args: [] }]);
+  }
+  // wheel_spins.consent (1 = box ticked) and email_via ("resend" = the 3 code emails come from our engine, which reads
+  // this table; "klaviyo" = a Klaviyo event drives them): one source per spin, never both.
+  const wsInfo = await db.execute(`PRAGMA table_info(wheel_spins)`);
+  const wsCols = new Set(wsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  for (const [col, ddl] of [["consent", "INTEGER"], ["email_via", "TEXT"]] as const) {
+    if (!wsCols.has(col)) await runBatch(`wheel_spins add ${col}`, [{ sql: `ALTER TABLE wheel_spins ADD COLUMN ${col} ${ddl}`, args: [] }]);
   }
 
   // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
@@ -3672,6 +3713,8 @@ export interface WheelSpinRow {
   expires_at: number | null;
   locale: string | null;
   created_at: number;
+  consent?: number | null;
+  email_via?: string | null;
 }
 
 export async function getWheelSpin(emailKey: string): Promise<WheelSpinRow | null> {
@@ -3875,6 +3918,123 @@ export async function finishEmailSend(id: number, r: { status: "sent" | "failed"
     sql: `UPDATE email_sends SET status = ?, resend_id = COALESCE(?, resend_id), error = ?, updated_at = ? WHERE id = ?`,
     args: [r.status, r.resendId ?? null, r.error ?? null, Math.floor(Date.now() / 1000), id],
   });
+}
+
+/** Emails counted against Resend's caps since `sinceSec` (everything claimed, except failed or skipped tries). */
+export async function countEmailSendsSince(sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT COUNT(*) AS n FROM email_sends WHERE created_at >= ? AND status NOT IN ('failed', 'skipped')`, args: [sinceSec] });
+  return Number(rowToObj(r.rows[0]).n ?? 0);
+}
+
+// ─── Email outbox (Resend daily cap) ───────────────────────────────
+
+export interface OutboxRow { id: number; idemKey: string; priority: number; notBefore: number; expiresAt: number; payload: string; attempts: number }
+
+/** Queue an email. False when the same idem_key is already queued (or was sent through the queue). */
+export async function enqueueEmail(e: { idemKey: string; priority: number; notBefore: number; expiresAt: number; payload: string }): Promise<boolean> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({
+    sql: `INSERT INTO email_outbox (idem_key, priority, not_before, expires_at, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idem_key) DO NOTHING`,
+    args: [e.idemKey, e.priority, e.notBefore, e.expiresAt, e.payload, now, now],
+  });
+  return r.rowsAffected === 1;
+}
+
+/** Pending emails whose time has come, highest priority (lowest number) first, then oldest. */
+export async function dueOutboxEmails(nowSec: number, limit: number): Promise<OutboxRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT id, idem_key, priority, not_before, expires_at, payload, attempts FROM email_outbox WHERE status = 'pending' AND not_before <= ? ORDER BY priority, not_before, id LIMIT ?`,
+    args: [nowSec, limit],
+  });
+  return r.rows.map((x) => {
+    const o = rowToObj(x);
+    return { id: Number(o.id), idemKey: String(o.idem_key), priority: Number(o.priority), notBefore: Number(o.not_before), expiresAt: Number(o.expires_at), payload: String(o.payload), attempts: Number(o.attempts) };
+  });
+}
+
+/** Settle a queued email. "pending" = try again later (counts one attempt). */
+export async function finishOutboxEmail(id: number, status: "pending" | "sent" | "skipped" | "failed" | "expired", error: string | null = null): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE email_outbox SET status = ?, last_error = ?, attempts = attempts + CASE WHEN ? = 'pending' THEN 1 ELSE 0 END, updated_at = ? WHERE id = ?`,
+    args: [status, error, status, Math.floor(Date.now() / 1000), id],
+  });
+}
+
+/** Pending emails per priority (dashboard). */
+export async function countPendingOutbox(): Promise<Record<string, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT priority, COUNT(*) AS n FROM email_outbox WHERE status = 'pending' GROUP BY priority`);
+  return Object.fromEntries(r.rows.map((x) => { const o = rowToObj(x); return [String(o.priority), Number(o.n)]; }));
+}
+
+// ─── Consent collected by our own forms ───────────────────────────
+
+/** Record a ticked marketing box. An address that unsubscribed stays unsubscribed (only a human may undo that). */
+export async function recordEmailConsent(c: { email: string; source: string; locale?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({
+    sql: `INSERT INTO email_consents (email, status, source, locale, created_at, updated_at) VALUES (?, 'subscribed', ?, ?, ?, ?)
+          ON CONFLICT(email) DO UPDATE SET locale = COALESCE(excluded.locale, email_consents.locale), updated_at = excluded.updated_at`,
+    args: [c.email.trim().toLowerCase(), c.source, c.locale ?? null, now, now],
+  });
+}
+
+export async function markEmailConsentUnsubscribed(email: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_consents SET status = 'unsubscribed', updated_at = ? WHERE email = ?`, args: [Math.floor(Date.now() / 1000), email.trim().toLowerCase()] });
+}
+
+export async function getEmailConsent(email: string): Promise<{ status: string; source: string; locale: string | null } | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT status, source, locale FROM email_consents WHERE email = ?`, args: [email.trim().toLowerCase()] });
+  if (!r.rows.length) return null;
+  const o = rowToObj(r.rows[0]);
+  return { status: String(o.status), source: String(o.source), locale: o.locale == null ? null : String(o.locale) };
+}
+
+/** Subscribed addresses not yet on the Shopify customer (only used while settings email_consent_to_shopify = "1"). */
+export async function listConsentsNotInShopify(limit: number): Promise<Array<{ email: string; locale: string | null }>> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT email, locale FROM email_consents WHERE status = 'subscribed' AND in_shopify = 0 ORDER BY created_at LIMIT ?`, args: [limit] });
+  return r.rows.map((x) => { const o = rowToObj(x); return { email: String(o.email), locale: o.locale == null ? null : String(o.locale) }; });
+}
+
+export async function markConsentInShopify(email: string, state: 1 | 2 = 1): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_consents SET in_shopify = ? WHERE email = ?`, args: [state, email.trim().toLowerCase()] });
+}
+
+/** Unsubscribes / bounces / complaints not yet pushed to the Shopify customer (so Shopify Email skips them too). */
+export async function listSuppressionsNotInShopify(limit: number): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT email FROM email_suppressions WHERE in_shopify = 0 ORDER BY created_at LIMIT ?`, args: [limit] });
+  return r.rows.map((x) => String(rowToObj(x).email));
+}
+
+export async function markSuppressionInShopify(email: string, state: 1 | 2 = 1): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_suppressions SET in_shopify = ? WHERE email = ?`, args: [state, email.trim().toLowerCase()] });
+}
+
+/** Wheel spins whose code emails our engine sends (email_via = 'resend', box ticked), created since `sinceSec`. */
+export async function wheelSpinsForEngine(sinceSec: number): Promise<WheelSpinRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT * FROM wheel_spins WHERE email_via = 'resend' AND consent = 1 AND code IS NOT NULL AND created_at >= ? ORDER BY created_at`,
+    args: [sinceSec],
+  });
+  return r.rows.map((x) => rowToObj(x) as unknown as WheelSpinRow);
+}
+
+/** Who sends this spin's emails, and whether the box was ticked. */
+export async function setWheelSpinEmailVia(emailKey: string, consent: boolean, via: "resend" | "klaviyo"): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE wheel_spins SET consent = ?, email_via = ? WHERE email_key = ?`, args: [consent ? 1 : 0, via, emailKey] });
 }
 
 /** Suppressed addresses per reason (unsubscribe, bounce, complaint). */

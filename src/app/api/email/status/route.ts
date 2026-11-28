@@ -7,13 +7,16 @@
  *   - "mode" { mode: off|test|live } — "live" refused while configuration is missing;
  *   - "test-recipients" { value } — comma-separated addresses for mode "test";
  *   - "address" { value } — mailing address printed in every footer (CASL);
- *   - "takeover" { group, on } — move a group from the relays to the engine (or back).
+ *   - "takeover" { group, on } — move a group from the relays to the engine (or back);
+ *   - "provider" { provider: klaviyo|test|resend } — THE switch (free email): who sends every automatic email.
+ *     "test"/"resend" refused while configuration is missing; entering "resend" restarts the hand-over time.
  */
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { acquireLease, countEmailSuppressions, getEmailSendStats, getSetting, releaseLease, setSetting } from "@/lib/database";
+import { acquireLease, countEmailSendsSince, countEmailSuppressions, countPendingOutbox, getEmailSendStats, getSetting, releaseLease, setSetting } from "@/lib/database";
 import { RELAY_LEASE_KEY, RELAY_LEASE_TTL_S } from "@/lib/klaviyo-campaigns";
-import { ADDRESS_KEY, MODE_KEY, TEST_RECIPIENTS_KEY, configProblems, loadEngineConfig, parseMode, parseRecipients } from "@/lib/email/engine";
+import { ADDRESS_KEY, MODE_KEY, PROVIDER_KEY, PROVIDER_SINCE_KEY, TEST_RECIPIENTS_KEY, configProblems, loadEngineConfig, parseMode, parseProvider, parseRecipients } from "@/lib/email/engine";
+import { routeFor } from "@/lib/email/dispatch";
 import { FLOWS, GROUPS, TAKEOVER_KEY, parseTakeover, type FlowGroup } from "@/lib/email/flows";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +24,16 @@ export const dynamic = "force-dynamic";
 async function status() {
   const cfg = await loadEngineConfig(getSetting);
   const takeover = parseTakeover(await getSetting(TAKEOVER_KEY));
-  const [stats, suppressions] = await Promise.all([getEmailSendStats(Math.floor(Date.now() / 1000) - 30 * 86_400), countEmailSuppressions()]);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const [stats, suppressions, sent24h, sent30d, outbox] = await Promise.all([
+    getEmailSendStats(nowSec - 30 * 86_400), countEmailSuppressions(), countEmailSendsSince(nowSec - 86_400), countEmailSendsSince(nowSec - 30 * 86_400), countPendingOutbox(),
+  ]);
   return {
     mode: cfg.mode,
+    provider: cfg.provider,
+    /** where emails really go (a provider with missing configuration falls back to Klaviyo) */
+    route: routeFor(cfg),
+    quota: { sent24h, dailyCap: cfg.dailyCap, sent30d, monthlyCap: cfg.monthlyCap, outbox },
     problems: configProblems(cfg),
     testRecipients: [...cfg.testRecipients],
     mailingAddress: cfg.mailingAddress,
@@ -58,7 +68,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const b = (await request.json().catch(() => ({}))) as { action?: string; mode?: string; value?: string; group?: string; on?: boolean };
+  const b = (await request.json().catch(() => ({}))) as { action?: string; mode?: string; provider?: string; value?: string; group?: string; on?: boolean };
   const bad = (error: string) => NextResponse.json({ error }, { status: 400 });
   switch (b.action) {
     case "mode": {
@@ -103,6 +113,21 @@ export async function POST(request: Request) {
         if (b.on) t[group] = t[group] ?? new Date().toISOString();
         else delete t[group];
         await setSetting(TAKEOVER_KEY, JSON.stringify(t));
+      });
+      if (busy) return busy;
+      break;
+    }
+    case "provider": {
+      const provider = parseProvider(String(b.provider ?? ""));
+      if (provider !== b.provider) return bad("fournisseur invalide");
+      if (provider !== "klaviyo") {
+        const problems = configProblems(await loadEngineConfig(getSetting));
+        if (problems.length) return bad(`Configuration incomplète : ${problems.join(" · ")}`);
+      }
+      if (provider === "test" && !parseRecipients(await getSetting(TEST_RECIPIENTS_KEY)).size) return bad("Ajoute d’abord une adresse de test.");
+      const busy = await underLease(async () => {
+        if (parseProvider(await getSetting(PROVIDER_KEY)) !== "resend" && provider === "resend") await setSetting(PROVIDER_SINCE_KEY, new Date().toISOString());
+        await setSetting(PROVIDER_KEY, provider);
       });
       if (busy) return busy;
       break;

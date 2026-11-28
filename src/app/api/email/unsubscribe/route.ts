@@ -7,7 +7,7 @@
  * "Unsubscribe" button. CASL: the request is honoured at once (the law allows up to 10 business days).
  */
 import { NextResponse } from "next/server";
-import { markSuppressionInKlaviyo, suppressEmail } from "@/lib/database";
+import { markEmailConsentUnsubscribed, markSuppressionInKlaviyo, suppressEmail } from "@/lib/database";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { clientIp } from "@/lib/client-ip";
 import { esc } from "@/lib/email/layout";
@@ -70,6 +70,9 @@ export async function POST(request: Request) {
   if (!email) return invalid();
   const oneClick = /List-Unsubscribe=One-Click/i.test(await request.text().catch(() => ""));
   await suppressEmail({ email, reason: "unsubscribe", source: oneClick ? "one-click" : "link" });
+  // our own consent record too (the wheel's ticked box); the Shopify customer is updated by the email-flows cron
+  // (email_suppressions.in_shopify), so Shopify Email campaigns skip this person as well
+  await markEmailConsentUnsubscribed(email).catch((err) => console.warn(`[unsubscribe] consent row update failed: ${err}`));
   // Klaviyo still sends the relay emails during the hand-over: unsubscribe there too. On failure the
   // /api/cron/email-flows run retries it (email_suppressions.in_klaviyo stays 0).
   if (process.env.KLAVIYO_API_KEY) {

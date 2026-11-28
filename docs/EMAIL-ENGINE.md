@@ -8,6 +8,22 @@ events (free plan): only the sending moves.
 **State: built, OFF.** No Resend account yet; `email_engine_mode` = off, so nothing is sent and
 the relays behave exactly as before.
 
+**2026-11-27 — one switch for everything: `settings.email_provider`** (`klaviyo` default | `test` | `resend`). It
+supersedes the per-group hand-over below for the free-email plan (Mat's guide: `docs/EMAIL-GRATUIT.md`):
+
+| Piece | File |
+|---|---|
+| The switch, caps (95/day, 2900/month), priority tiers, `RETRY_LATER` | `src/lib/email/engine.ts` |
+| Event emails (morning report, alerts, confirmations, referral) instead of `trackEvent` | `src/lib/email/dispatch.ts`, `direct.ts` |
+| Queue for emails over the cap (table `email_outbox`), day slices for bulk sends | `src/lib/email/outbox.ts` |
+| Wheel spins as triggers from Turso (no Klaviyo profile) | `src/lib/email/wheel-source.ts`, `wheel_spins.consent/email_via` |
+| Consent kept in Turso, unsubscribes pushed to the Shopify customer | `email_consents`, `src/lib/email/shopify-consent.ts` |
+| Checkout #2 with 15 $ code and cart reminder sent by Resend | `relance-code.ts#relance2Email`, `cart-relay.ts#cartEmail` |
+| Klaviyo free-plan headroom (suppress, reversible) | `scripts/klaviyo-headroom.mts`, `src/lib/email/klaviyo-headroom.ts` |
+
+With `resend` every group is taken over at once (`effectiveTakeover`), flow-relay owns nothing (`allRelayKeys`), and a
+broken configuration routes everything back to Klaviyo (`routeFor`).
+
 ## Pieces
 
 | Piece | File |
